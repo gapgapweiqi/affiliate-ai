@@ -7,10 +7,10 @@
 import { eq } from "drizzle-orm";
 import { db, schema } from "../lib/db.ts";
 
-export async function withDefaultImage<T extends { productId: number; imageUrl?: string; videoUrl?: string }>(
+export async function withDefaultImage<T extends { productId: number; imageUrl?: string; videoUrl?: string; videoPath?: string }>(
   opts: T,
 ): Promise<T> {
-  if (opts.imageUrl || opts.videoUrl) return opts;
+  if (opts.imageUrl || opts.videoUrl || opts.videoPath) return opts;
   const [row] = await db
     .select({ primaryImage: schema.products.primaryImage })
     .from(schema.products)

@@ -113,3 +113,21 @@ async function pickVariantWeighted(
     variantCode: c.variantCode,
   };
 }
+
+/** A specific approved+active variant (e.g. the caption written for a video). */
+export async function loadVariant(variantId: number, channel: Platform): Promise<PickedVariant | null> {
+  const [c] = await db
+    .select()
+    .from(schema.contentVariants)
+    .where(
+      and(
+        eq(schema.contentVariants.id, variantId),
+        eq(schema.contentVariants.channel, channel),
+        eq(schema.contentVariants.gateApproved, true),
+        eq(schema.contentVariants.isActive, true),
+      ),
+    )
+    .limit(1);
+  if (!c) return null;
+  return { id: c.id, caption: c.caption, hashtags: c.hashtags ?? [], hook: c.hook, angle: c.angle, variantCode: c.variantCode };
+}

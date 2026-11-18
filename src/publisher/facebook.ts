@@ -6,6 +6,7 @@
  *   Text-only:    POST /{page-id}/feed       { message }
  *   With image:   POST /{page-id}/photos     { url, caption, published }
  *   With video:   POST /{page-id}/videos     { file_url, description }
+ *   Local video:  POST graph-video…/{page-id}/videos  multipart { source, description }
  *
  * Uses long-lived Page Access Token (META_PAGE_ACCESS_TOKEN).
  * Token lifecycle: 60 days → must refresh before expiry. M0 health
@@ -17,21 +18,28 @@
  * Meta credentials arrive.
  */
 
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../lib/db.ts";
 import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
 import { errMsg, retry } from "../lib/retry.ts";
-import { pickVariant } from "./variant-picker.ts";
+import { loadVariant, pickVariant } from "./variant-picker.ts";
 import { withDefaultImage } from "./media.ts";
 
 const log = child("publisher.facebook");
 const GRAPH_BASE = "https://graph.facebook.com/v21.0";
+const GRAPH_VIDEO_BASE = "https://graph-video.facebook.com/v21.0";
 
 export interface PublishToFacebookOptions {
   productId: number;
   imageUrl?: string;     // optional: post with image
   videoUrl?: string;     // optional: post with video (MP4)
+  /** optional: local MP4 uploaded directly (no public URL needed), e.g. from WanGP. */
+  videoPath?: string;
+  /** Post this exact variant instead of letting the bandit pick (e.g. a video's own caption). */
+  variantId?: number;
   scheduledAt?: Date;    // future: schedule for later
   /** Override env DEBUG_DRY_RUN — useful for tests. */
   forceDryRun?: boolean;
@@ -71,7 +79,9 @@ function isDryRunMode(opts: PublishToFacebookOptions): boolean {
 export async function publishToFacebook(opts: PublishToFacebookOptions): Promise<PublishResult> {
   opts = await withDefaultImage(opts);
   // 1. Pick variant
-  const variant = await pickVariant(opts.productId, "facebook");
+  const variant = opts.variantId
+    ? await loadVariant(opts.variantId, "facebook")
+    : await pickVariant(opts.productId, "facebook");
   if (!variant) {
     log.warn({ productId: opts.productId }, "no approved facebook variant — generate first");
     // Insert failed row so the operator can see we tried
@@ -109,7 +119,7 @@ export async function publishToFacebook(opts: PublishToFacebookOptions): Promise
       status: "publishing",
       captionPosted: variant.caption,
       imageUrl: opts.imageUrl ?? null,
-      videoUrl: opts.videoUrl ?? null,
+      videoUrl: opts.videoUrl ?? (opts.videoPath ? `file:${basename(opts.videoPath)}` : null),
       dryRun,
     })
     .returning({ id: schema.publishedPosts.id });
@@ -131,7 +141,7 @@ export async function publishToFacebook(opts: PublishToFacebookOptions): Promise
         variantId: variant.id,
         captionLen: variant.caption.length,
         hasImage: Boolean(opts.imageUrl),
-        hasVideo: Boolean(opts.videoUrl),
+        hasVideo: Boolean(opts.videoUrl || opts.videoPath),
       },
       "[DRY-RUN] would publish to Facebook",
     );
@@ -172,6 +182,32 @@ export async function publishToFacebook(opts: PublishToFacebookOptions): Promise
   };
 }
 
+let pageTokenCache: { configured: string; page: string } | null = null;
+
+/**
+ * META_PAGE_ACCESS_TOKEN may hold either a Page token or a (long-lived)
+ * user token of a Page admin. Page endpoints reject user tokens, so ask the
+ * Graph API for the Page's own token. A Page token derived from a long-lived
+ * user token does not expire. If the lookup returns nothing, the configured
+ * token is already a Page token.
+ */
+async function resolvePageToken(pageId: string, configured: string): Promise<string> {
+  if (pageTokenCache?.configured === configured) return pageTokenCache.page;
+  let page = configured;
+  try {
+    const res = await fetch(`${GRAPH_BASE}/${pageId}?fields=access_token&access_token=${encodeURIComponent(configured)}`);
+    const data = (await res.json()) as { access_token?: string };
+    if (data.access_token) {
+      page = data.access_token;
+      log.info({ pageId }, "using Page token derived from the configured user token");
+    }
+  } catch (err) {
+    log.warn({ err: errMsg(err) }, "page token lookup failed — using configured token as-is");
+  }
+  pageTokenCache = { configured, page };
+  return page;
+}
+
 /**
  * Real Meta Graph API call. Only invoked when token is present + not dry-run.
  */
@@ -180,10 +216,14 @@ async function callMetaApi(
   opts: PublishToFacebookOptions,
 ): Promise<{ platformPostId: string; platformPostUrl: string | null }> {
   const pageId = env.META_PAGE_ID!;
-  const token = env.META_PAGE_ACCESS_TOKEN!;
+  const token = await resolvePageToken(pageId, env.META_PAGE_ACCESS_TOKEN!);
 
   let endpoint: string;
   let body: Record<string, string>;
+
+  if (opts.videoPath) {
+    return uploadLocalVideo(caption, opts.videoPath, pageId, token);
+  }
 
   if (opts.videoUrl) {
     endpoint = `${GRAPH_BASE}/${pageId}/videos`;
@@ -229,4 +269,27 @@ async function callMetaApi(
     ? `https://www.facebook.com/${pageId}/posts/${platformPostId.split("_")[1] ?? platformPostId}`
     : null;
   return { platformPostId, platformPostUrl };
+}
+
+/** Multipart upload of a local MP4 — Meta fetches nothing, so no public hosting needed. */
+async function uploadLocalVideo(
+  caption: string,
+  videoPath: string,
+  pageId: string,
+  token: string,
+): Promise<{ platformPostId: string; platformPostUrl: string | null }> {
+  const bytes = await readFile(videoPath);
+  const form = new FormData();
+  form.set("access_token", token);
+  form.set("description", caption);
+  form.set("source", new Blob([bytes], { type: "video/mp4" }), basename(videoPath));
+
+  const res = await fetch(`${GRAPH_VIDEO_BASE}/${pageId}/videos`, { method: "POST", body: form });
+  const data = (await res.json()) as FbApiPostResponse;
+  if (data.error) throw new Error(`Meta API error ${data.error.code}: ${data.error.message}`);
+  const videoId = data.id ?? "";
+  return {
+    platformPostId: videoId,
+    platformPostUrl: videoId ? `https://www.facebook.com/${pageId}/videos/${videoId}` : null,
+  };
 }

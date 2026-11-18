@@ -54,7 +54,7 @@ const envSchema = z.object({
 
   ELEVENLABS_API_KEY: optStr,
   ELEVENLABS_VOICE_ID: optStr,
-  ELEVENLABS_MODEL: z.string().default("eleven_multilingual_v3"),
+  ELEVENLABS_MODEL: z.string().default("eleven_v3"), // Thai-capable; eleven_multilingual_v3 does not exist
 
   REPLICATE_API_TOKEN: optStr,
   FLUX_API_KEY: optStr,
@@ -92,6 +92,10 @@ const envSchema = z.object({
   GOOGLE_OAUTH_REFRESH_TOKEN: optStr,
   GOOGLE_SEARCH_CONSOLE_PROPERTY: optStr,
   BING_INDEXNOW_KEY: optStr,
+
+  // Local video generation (tools/wangp-server on the host GPU)
+  WANGP_URL: optStr,
+  WANGP_PRESENTER_FILE: optStr,  // image in the server's output dir, e.g. presenter-default.jpg
 
   // Social
   META_APP_ID: optStr,

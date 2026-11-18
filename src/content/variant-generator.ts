@@ -35,7 +35,7 @@ interface ParsedVariant {
 /**
  * Extract first JSON object from Claude response (handles trailing commentary).
  */
-function extractJson<T>(text: string): T | null {
+export function extractJson<T>(text: string): T | null {
   const cleaned = text.replace(/^```(?:json)?\s*/i, "");
   const start = cleaned.indexOf("{");
   if (start === -1) return null;
