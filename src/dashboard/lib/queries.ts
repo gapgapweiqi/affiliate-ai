@@ -539,3 +539,21 @@ export function getVideoQueue(limit = 5) {
     LIMIT ${limit}
   `);
 }
+
+/** Next products the 07:30 daily-captions job will write captions for
+ *  (mirror of src/brain/daily-captions.ts captionCandidates). */
+export function getCaptionCandidates(limit = 5) {
+  return rows<{ id: number; name: string; finalScore: number | null }>(sql`
+    SELECT p.id, p.name, p.final_score AS "finalScore" FROM products p
+    WHERE p.is_active AND NOT p.flag_blacklisted
+      AND p.primary_image LIKE 'https://%'
+      AND coalesce(p.final_score, 0) > 0
+      AND NOT EXISTS (SELECT 1 FROM content_variants cv
+                      WHERE cv.product_id = p.id AND cv.channel = 'facebook' AND cv.gate_approved AND cv.is_active)
+      AND NOT EXISTS (SELECT 1 FROM published_posts pp
+                      WHERE pp.product_id = p.id AND pp.channel = 'facebook' AND pp.status = 'published'
+                        AND pp.published_at > now() - interval '24 hours')
+    ORDER BY p.final_score DESC, p.first_seen_at DESC
+    LIMIT ${limit}
+  `);
+}

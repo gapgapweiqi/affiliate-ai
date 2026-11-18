@@ -182,7 +182,7 @@ export async function generateVariants(
         tier: "fast",
         system,
         prompt: user,
-        maxTokens: 1500, // Thai is token-heavy; 600 truncated captions mid-JSON
+        maxTokens: 5000, // Thai is token-heavy and Haiku 5.5 thinks first; smaller budgets cut the JSON
         temperature: 0.85, // higher = more variety across A/B/C
         task: `variant_caption.${opts.channel}`,
       });

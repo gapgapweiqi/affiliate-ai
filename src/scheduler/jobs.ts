@@ -16,6 +16,7 @@ import { pickKeywords, pickKeywordsWeighted } from "../scraper/niches.ts";
 import { runLearningOptimizer } from "../brain/learning.ts";
 import { runPromoHunter } from "../brain/promo-hunter.ts";
 import { runPromoTrigger } from "../brain/promo-trigger.ts";
+import { runDailyCaptions } from "../brain/daily-captions.ts";
 import { rescoreProducts } from "../brain/product-scorer.ts";
 import { runEngagementTracker } from "../engagement/tracker.ts";
 import { runSourceHealthCheck } from "../monitoring/source-health.ts";
@@ -83,6 +84,15 @@ async function rescoreSafely(): Promise<void> {
   } catch (err) {
     log.error({ err: errMsg(err) }, "rescoreProducts failed");
   }
+}
+
+/**
+ * Daily captions for the top-scoring products that have none, so the
+ * photo-post queue isn't empty when no promo fired. Promos still go first.
+ */
+export async function jobDailyCaptions(): Promise<void> {
+  const r = await runDailyCaptions({ count: env.DAILY_CAPTION_PRODUCTS });
+  log.info(r, "dailyCaptions done");
 }
 
 /**

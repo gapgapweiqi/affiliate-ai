@@ -1,6 +1,7 @@
 import { Badge, Card, PageHeader, Table, Td, truncate } from "@/components/ui";
 import { ago, baht, num, pct } from "@/lib/format";
 import {
+  getCaptionCandidates,
   getCoolingDown,
   getPostQueue,
   getPostsTodayByChannel,
@@ -135,16 +136,20 @@ function QueueTable({ items, showPromo, nextLabel }: { items: QueueItem[]; showP
 export default async function QueuePage() {
   const photoCron = "10,40 8-22 * * *"; // src/scheduler/index.ts autoPublish
   const videoCron = process.env.CRON_VIDEO_POST || "30 22 * * *";
+  const captionCron = process.env.CRON_DAILY_CAPTIONS || "30 7 * * *";
+  const captionCount = Number(process.env.DAILY_CAPTION_PRODUCTS ?? 5);
+  const nextCaptions = nextRun(captionCron);
   const nextPhoto = nextRun(photoCron);
   const nextVideo = nextRun(videoCron);
 
-  const [fbQueue, igQueue, ttQueue, cooling, today, videoQueue] = await Promise.all([
+  const [fbQueue, igQueue, ttQueue, cooling, today, videoQueue, captionNext] = await Promise.all([
     getPostQueue("facebook", 10),
     getPostQueue("instagram", 5),
     getPostQueue("tiktok", 5),
     getCoolingDown("facebook"),
     getPostsTodayByChannel(),
     getVideoQueue(5),
+    getCaptionCandidates(captionCount),
   ]);
   const queues: Record<Channel, QueueItem[]> = { facebook: fbQueue, instagram: igQueue, tiktok: ttQueue };
   const todayBy = Object.fromEntries(today.map((t) => [t.channel, t]));
@@ -199,8 +204,27 @@ export default async function QueuePage() {
         <QueueTable items={fbQueue} showPromo nextLabel={nextPhoto ? bkkLabel(nextPhoto) : "–"} />
         {fbQueue.length === 0 && (
           <p className="mt-2 text-sm text-slate-500">
-            ไม่มีสินค้าที่พร้อมโพสต์ — caption ใหม่จะถูกสร้างเมื่อ Promo Hunter เจอโปร
+            ไม่มีสินค้าที่พร้อมโพสต์ — รอ caption ประจำวัน ({nextCaptions ? bkkLabel(nextCaptions) : "–"}) หรือโปรจาก Promo Hunter
           </p>
+        )}
+      </Card>
+
+      <Card
+        title={`Caption ประจำวัน · ${nextCaptions ? bkkLabel(nextCaptions) : "–"}`}
+        subtitle={`Haiku เขียน caption 3 มุมให้ ${captionCount} สินค้าคะแนนสูงสุดที่ยังไม่มี caption · ผ่าน Quality Gate แล้วเข้าคิวโพสต์รูปด้านบน (โปรยังแทรกคิวได้เสมอ)`}
+        className="mt-6"
+      >
+        {captionNext.length === 0 ? (
+          <p className="text-sm text-slate-500">สินค้าคะแนนสูงมี caption ครบแล้ว</p>
+        ) : (
+          <ol className="ml-5 list-decimal space-y-1 text-sm">
+            {captionNext.map((p) => (
+              <li key={p.id}>
+                {truncate(p.name, 70)}{" "}
+                <span className="tabular-nums text-xs text-slate-500">· {p.finalScore == null ? "–" : p.finalScore.toFixed(3)}</span>
+              </li>
+            ))}
+          </ol>
         )}
       </Card>
 

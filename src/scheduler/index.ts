@@ -26,6 +26,7 @@ import {
   jobShopeeVideoDigest,
   jobAutoPublish,
   jobAutoVideoPost,
+  jobDailyCaptions,
 } from "./jobs.ts";
 
 const log = child("scheduler");
@@ -115,6 +116,12 @@ const SCHEDULES: JobSchedule[] = [
     cron: "10,40 8-22 * * *",
     description: "M5 Auto-publish — pick best variant per channel, post (every 30 min, 8AM-10PM BKK)",
     handler: jobAutoPublish,
+  },
+  {
+    name: "dailyCaptions",
+    cron: env.CRON_DAILY_CAPTIONS,
+    description: "Captions for the top-scoring products without one (07:30 BKK, before the first post)",
+    handler: jobDailyCaptions,
   },
   {
     name: "autoVideoPost",

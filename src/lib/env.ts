@@ -122,6 +122,8 @@ const envSchema = z.object({
   SCRAPE_PRODUCTS_PER_KEYWORD: z.coerce.number().int().positive().default(15),
   CRON_SCRAPE_PRODUCTS: z.string().default("0 8,13,19,22 * * *"),
   CRON_VIDEO_POST: z.string().default("30 22 * * *"),
+  CRON_DAILY_CAPTIONS: z.string().default("30 7 * * *"),
+  DAILY_CAPTION_PRODUCTS: z.coerce.number().int().min(0).default(5),
 
   // Budget caps
   // Per-channel daily post caps (V2 vision safeguard against bot-detection)
