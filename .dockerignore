@@ -5,3 +5,7 @@ node_modules
 dist
 logs
 *.log
+**/node_modules
+**/.next
+src/dashboard
+site-out

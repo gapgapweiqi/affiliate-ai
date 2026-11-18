@@ -100,5 +100,17 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  dashboard:
+    build: ./src/dashboard
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://botuser:botpass@db:5432/affiliate?sslmode=disable
+    ports:
+      - "3100:3100"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   pgdata:
