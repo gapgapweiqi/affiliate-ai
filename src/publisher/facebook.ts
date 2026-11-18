@@ -23,6 +23,7 @@ import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
 import { errMsg, retry } from "../lib/retry.ts";
 import { pickVariant } from "./variant-picker.ts";
+import { withDefaultImage } from "./media.ts";
 
 const log = child("publisher.facebook");
 const GRAPH_BASE = "https://graph.facebook.com/v21.0";
@@ -68,6 +69,7 @@ function isDryRunMode(opts: PublishToFacebookOptions): boolean {
  * Pick a variant + publish it to FB. Logs to published_posts regardless of mode.
  */
 export async function publishToFacebook(opts: PublishToFacebookOptions): Promise<PublishResult> {
+  opts = await withDefaultImage(opts);
   // 1. Pick variant
   const variant = await pickVariant(opts.productId, "facebook");
   if (!variant) {

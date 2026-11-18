@@ -8,7 +8,10 @@ import { z } from "zod";
 
 config({ path: ".env" });
 
-const optStr = z.string().optional().or(z.literal("").transform(() => undefined));
+/** Domains are used as `https://${host}/...` — accept "https://x.com/ " too. */
+const normalizeHost = (v: string) => v.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+
+const optStr =z.string().optional().or(z.literal("").transform(() => undefined));
 const boolish = z
   .string()
   .optional()
@@ -16,7 +19,7 @@ const boolish = z
 
 const envSchema = z.object({
   // Core
-  DOMAIN_NAME: z.string().default("example.com"),
+  DOMAIN_NAME: z.string().default("example.com").transform(normalizeHost),
   NODE_ENV: z.enum(["development", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   TIMEZONE: z.string().default("Asia/Bangkok"),
@@ -68,7 +71,7 @@ const envSchema = z.object({
 
   // Public site config (used by site builder + deployer).
   // Override these in your .env to point at your own domain.
-  SITE_DOMAIN: z.string().default("example.com"),
+  SITE_DOMAIN: z.string().default("example.com").transform(normalizeHost),
   SITE_NAME: z.string().default("Affiliate AI"),
   SITE_OUT_DIR: z.string().default("./dist"),
   /** Set true to auto-deploy to Cloudflare Pages after every site rebuild. */
