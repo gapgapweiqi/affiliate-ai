@@ -17,7 +17,7 @@ async function main() {
     SELECT id, LEFT(name, 60) AS name, final_score, demand_score, profitability_score,
            sold_count, rating, rating_count, ROUND((discount_percent * 100)::numeric) AS disc
     FROM products
-    WHERE final_score IS NOT NULL
+    WHERE final_score IS NOT NULL AND is_active AND NOT flag_blacklisted
     ORDER BY final_score DESC
     LIMIT 10
   `);

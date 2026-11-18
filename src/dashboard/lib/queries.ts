@@ -442,3 +442,100 @@ export function getFailedPosts(limit = 15) {
     ORDER BY pp.id DESC LIMIT ${limit}
   `);
 }
+
+/* ───────────────────────── Post Queue ─────────────────────────
+ * Mirrors the bot's own selection so the operator sees what goes out next:
+ *   photo posts → src/publisher/auto-publish.ts (per channel)
+ *   video post  → src/publisher/auto-video.ts
+ * Keep the WHERE / ORDER BY clauses in sync with those files.
+ */
+
+export interface QueueItem {
+  id: number;
+  name: string;
+  image: string | null;
+  currentPrice: number | null;
+  originalPrice: number | null;
+  discountPercent: number | null;
+  rating: number | null;
+  soldCount: number | null;
+  finalScore: number | null;
+  demandScore: number | null;
+  dealScore: number | null;
+  trendVelocity: number | null;
+  isPromo: boolean;
+  approvedVariants: number;
+  lastPostedAt: string | null;
+}
+
+const QUEUE_COLUMNS = sql.raw(`
+  p.id, p.name, p.primary_image AS image,
+  p.current_price AS "currentPrice", p.original_price AS "originalPrice",
+  p.discount_percent AS "discountPercent", p.rating, p.sold_count AS "soldCount",
+  p.final_score AS "finalScore", p.demand_score AS "demandScore",
+  p.profitability_score AS "dealScore", p.trend_velocity AS "trendVelocity"`);
+
+/** Photo-post queue for one channel, in the exact order auto-publish picks. */
+export function getPostQueue(channel: "facebook" | "instagram" | "tiktok", limit = 10) {
+  return rows<QueueItem>(sql`
+    SELECT ${QUEUE_COLUMNS},
+      EXISTS(SELECT 1 FROM promo_events pe
+             WHERE pe.product_id = p.id AND pe.detected_at > now() - interval '6 hours') AS "isPromo",
+      (SELECT count(*) FROM content_variants cv
+        WHERE cv.product_id = p.id AND cv.channel = ${channel} AND cv.gate_approved AND cv.is_active)::int AS "approvedVariants",
+      (SELECT max(published_at) FROM published_posts pp
+        WHERE pp.product_id = p.id AND pp.channel = ${channel} AND pp.status = 'published') AS "lastPostedAt"
+    FROM products p
+    WHERE p.is_active AND NOT p.flag_blacklisted
+      AND EXISTS (SELECT 1 FROM content_variants cv
+                  WHERE cv.product_id = p.id AND cv.channel = ${channel} AND cv.gate_approved AND cv.is_active)
+      AND NOT EXISTS (SELECT 1 FROM published_posts pp
+                      WHERE pp.product_id = p.id AND pp.channel = ${channel} AND pp.status = 'published'
+                        AND pp.published_at > now() - interval '24 hours')
+    ORDER BY "isPromo" DESC, coalesce(p.final_score, 0) DESC, p.first_seen_at DESC
+    LIMIT ${limit}
+  `);
+}
+
+/** Products held back by the 24 h repeat rule (have a caption, posted recently). */
+export function getCoolingDown(channel: "facebook" | "instagram" | "tiktok") {
+  return rows<{ id: number; name: string; finalScore: number | null; lastPostedAt: string }>(sql`
+    SELECT p.id, p.name, p.final_score AS "finalScore", max(pp.published_at) AS "lastPostedAt"
+    FROM products p JOIN published_posts pp ON pp.product_id = p.id
+    WHERE pp.channel = ${channel} AND pp.status = 'published' AND pp.published_at > now() - interval '24 hours'
+    GROUP BY p.id, p.name, p.final_score
+    ORDER BY max(pp.published_at) DESC
+  `);
+}
+
+/** Live (non-dry-run) posts today per channel, Bangkok day — the daily cap counts these. */
+export function getPostsTodayByChannel() {
+  return rows<{ channel: string; live: number; dryRun: number }>(sql`
+    SELECT channel::text,
+      count(*) FILTER (WHERE NOT dry_run)::int AS live,
+      count(*) FILTER (WHERE dry_run)::int AS "dryRun"
+    FROM published_posts
+    WHERE status = 'published' AND (published_at AT TIME ZONE 'Asia/Bangkok')::date = ${BKK_DAY}
+    GROUP BY channel
+  `);
+}
+
+/** Video-post queue, in the exact order auto-video picks (7-day per-product cooldown). */
+export function getVideoQueue(limit = 5) {
+  return rows<QueueItem>(sql`
+    SELECT ${QUEUE_COLUMNS}, false AS "isPromo",
+      (SELECT count(*) FROM content_variants cv
+        WHERE cv.product_id = p.id AND cv.channel = 'facebook' AND cv.gate_approved AND cv.is_active)::int AS "approvedVariants",
+      (SELECT max(created_at) FROM published_posts pp
+        WHERE pp.product_id = p.id AND pp.channel = 'facebook' AND pp.video_url IS NOT NULL) AS "lastPostedAt"
+    FROM products p
+    WHERE p.is_active AND NOT p.flag_blacklisted
+      AND p.primary_image LIKE 'https://%'
+      AND coalesce(p.final_score, 0) > 0
+      AND NOT EXISTS (SELECT 1 FROM published_posts pp
+                      WHERE pp.product_id = p.id AND pp.channel = 'facebook' AND pp.video_url IS NOT NULL
+                        AND pp.created_at > now() - interval '7 days')
+    ORDER BY p.final_score DESC, p.first_seen_at DESC
+    LIMIT ${limit}
+  `);
+}

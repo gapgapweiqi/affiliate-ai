@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { href: "/", label: "ภาพรวมวันนี้", en: "Daily Snapshot", icon: "📊" },
+  { href: "/queue", label: "คิวโพสต์ถัดไป", en: "Post Queue", icon: "⏭️" },
   { href: "/revenue", label: "รายได้", en: "Revenue", icon: "💰" },
   { href: "/content", label: "คอนเทนต์", en: "Content", icon: "📝" },
   { href: "/trends", label: "เทรนด์และโอกาส", en: "Trends", icon: "📈" },
