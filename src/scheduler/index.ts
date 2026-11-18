@@ -25,6 +25,7 @@ import {
   jobScrapeTikTokShop,
   jobShopeeVideoDigest,
   jobAutoPublish,
+  jobAutoVideoPost,
 } from "./jobs.ts";
 
 const log = child("scheduler");
@@ -114,6 +115,12 @@ const SCHEDULES: JobSchedule[] = [
     cron: "10,40 8-22 * * *",
     description: "M5 Auto-publish — pick best variant per channel, post (every 30 min, 8AM-10PM BKK)",
     handler: jobAutoPublish,
+  },
+  {
+    name: "autoVideoPost",
+    cron: env.CRON_VIDEO_POST,
+    description: "Voiced product video (Sonnet + ElevenLabs + WanGP on host GPU) → Facebook (22:30 BKK)",
+    handler: jobAutoVideoPost,
   },
 ];
 

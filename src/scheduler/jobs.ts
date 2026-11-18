@@ -11,6 +11,7 @@ import { BudgetExceededError } from "../scraper/shopee/apify-client.ts";
 import { runTikTokShopScrape } from "../scraper/tiktok-shop/runner.ts";
 import { notifyShopeeVideoBacklog } from "../publisher/shopee-video.ts";
 import { runAutoPublish } from "../publisher/auto-publish.ts";
+import { runAutoVideoPost } from "../publisher/auto-video.ts";
 import { pickKeywords, pickKeywordsWeighted } from "../scraper/niches.ts";
 import { runLearningOptimizer } from "../brain/learning.ts";
 import { runPromoHunter } from "../brain/promo-hunter.ts";
@@ -82,6 +83,15 @@ async function rescoreSafely(): Promise<void> {
   } catch (err) {
     log.error({ err: errMsg(err) }, "rescoreProducts failed");
   }
+}
+
+/**
+ * Daily voiced product video → Facebook. Skips when the WanGP host is off.
+ */
+export async function jobAutoVideoPost(): Promise<void> {
+  const r = await runAutoVideoPost();
+  if (r.status === "failed") log.error(r, "autoVideoPost failed");
+  else log.info(r, "autoVideoPost done");
 }
 
 /**
