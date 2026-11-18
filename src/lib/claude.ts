@@ -86,6 +86,10 @@ export interface CompleteResult {
   stopReason: string | null;
 }
 
+function supportsTemperature(model: string): boolean {
+  return !/^claude-(opus|sonnet|haiku|fable)-5/.test(model);
+}
+
 /**
  * One-shot text completion. Throws LlmBudgetExceededError if daily cap hit.
  */
@@ -104,7 +108,8 @@ export async function complete(opts: CompleteOptions): Promise<CompleteResult> {
   const response = await client.messages.create({
     model,
     max_tokens: opts.maxTokens ?? 1024,
-    temperature: opts.temperature ?? 0.7,
+    // Claude 5-family models reject `temperature` (400 "deprecated for this model").
+    ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.7 } : {}),
     system: opts.system,
     messages: [{ role: "user", content: opts.prompt }],
     stop_sequences: opts.stopSequences,

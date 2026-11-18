@@ -21,6 +21,7 @@ import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
 import { errMsg, retry, sleep } from "../lib/retry.ts";
 import { pickVariant } from "./variant-picker.ts";
+import { withDefaultImage } from "./media.ts";
 
 const log = child("publisher.instagram");
 const GRAPH_BASE = "https://graph.facebook.com/v21.0";
@@ -64,6 +65,7 @@ function isDryRunMode(opts: PublishToInstagramOptions): boolean {
 export async function publishToInstagram(
   opts: PublishToInstagramOptions,
 ): Promise<PublishResult> {
+  opts = await withDefaultImage(opts);
   // 1. Pick variant
   const variant = await pickVariant(opts.productId, "instagram");
   if (!variant) {

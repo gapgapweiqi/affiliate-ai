@@ -12,3 +12,4 @@ secrets/
 .wrangler/
 .cache/
 coverage/
+site-out/
