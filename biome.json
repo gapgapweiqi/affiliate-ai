@@ -23,6 +23,6 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", ".astro", ".wrangler"]
+    "ignore": ["node_modules", "dist", ".astro", ".wrangler", "src/dashboard"]
   }
 }

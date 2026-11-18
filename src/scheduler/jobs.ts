@@ -11,10 +11,12 @@ import { BudgetExceededError } from "../scraper/shopee/apify-client.ts";
 import { runTikTokShopScrape } from "../scraper/tiktok-shop/runner.ts";
 import { notifyShopeeVideoBacklog } from "../publisher/shopee-video.ts";
 import { runAutoPublish } from "../publisher/auto-publish.ts";
+import { runAutoVideoPost } from "../publisher/auto-video.ts";
 import { pickKeywords, pickKeywordsWeighted } from "../scraper/niches.ts";
 import { runLearningOptimizer } from "../brain/learning.ts";
 import { runPromoHunter } from "../brain/promo-hunter.ts";
 import { runPromoTrigger } from "../brain/promo-trigger.ts";
+import { rescoreProducts } from "../brain/product-scorer.ts";
 import { runEngagementTracker } from "../engagement/tracker.ts";
 import { runSourceHealthCheck } from "../monitoring/source-health.ts";
 import { runDailyReport } from "../monitoring/daily-report.ts";
@@ -71,6 +73,25 @@ export async function jobScrapeTrending(): Promise<void> {
     { totalSucceeded, totalNew, totalCostUsd: totalCost.toFixed(4) },
     "scrapeTrending done",
   );
+  await rescoreSafely();
+}
+
+/** Recompute products.final_score; never fails the calling job. */
+async function rescoreSafely(): Promise<void> {
+  try {
+    await rescoreProducts();
+  } catch (err) {
+    log.error({ err: errMsg(err) }, "rescoreProducts failed");
+  }
+}
+
+/**
+ * Daily voiced product video → Facebook. Skips when the WanGP host is off.
+ */
+export async function jobAutoVideoPost(): Promise<void> {
+  const r = await runAutoVideoPost();
+  if (r.status === "failed") log.error(r, "autoVideoPost failed");
+  else log.info(r, "autoVideoPost done");
 }
 
 /**
@@ -110,6 +131,7 @@ export async function jobScrapeTikTokShop(): Promise<void> {
       log.error({ keyword, err: errMsg(err) }, "tiktok shop scrape failed");
     }
   }
+  await rescoreSafely();
 }
 
 /**
@@ -119,6 +141,7 @@ export async function jobScrapeTikTokShop(): Promise<void> {
 export async function jobLearningOptimizer(): Promise<void> {
   const result = await runLearningOptimizer({ windowDays: 1 });
   log.info(result, "learningOptimizer done");
+  await rescoreSafely();
 }
 
 /**

@@ -12,3 +12,5 @@ secrets/
 .wrangler/
 .cache/
 coverage/
+site-out/
+__pycache__/

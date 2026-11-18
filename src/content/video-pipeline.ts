@@ -1,0 +1,150 @@
+/**
+ * Voiced product video, end to end:
+ *
+ *   product ─► Sonnet: Thai voiceover + 2 shot prompts + FB caption
+ *              (caption gated + saved as a content_variant with its own link)
+ *           ─► ElevenLabs voice (MP3)
+ *           ─► WanGP: one product clip per shot (Shopee photo animated,
+ *              locked camera, printed text protected server-side)
+ *           ─► ffmpeg: crossfade the clips, fit them to the voice length,
+ *              lay them on a 1080x1920 canvas (blurred fill), mux the voice
+ *
+ * Shopee photos are square, so the vertical frame is filled with a blurred,
+ * zoomed copy of the same footage behind the sharp centred clip.
+ */
+
+import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { child } from "../lib/logger.ts";
+import { type VideoContent, writeVideoContent } from "./video-script.ts";
+import { generateVoice } from "./voice-generator.ts";
+import { generateProductVideo } from "./wangp-client.ts";
+
+const log = child("content.video-pipeline");
+const OUTPUT_DIR = "/tmp/affiliate-ai/video";
+const MAX_CLIP_SEC = 5;
+const XFADE_SEC = 0.5;
+
+export interface VoicedVideoResult {
+  path: string;          // final 1080x1920 MP4 with audio
+  content: VideoContent; // voiceover, shots, caption, variantId
+  voicePath: string;
+  voiceSec: number;
+  voiceDryRun: boolean;  // true = silent placeholder (no ElevenLabs key)
+  clipPaths: string[];
+}
+
+function run(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args);
+    let out = "";
+    let err = "";
+    p.stdout.on("data", (d) => {
+      out += d;
+    });
+    p.stderr.on("data", (d) => {
+      err += d;
+    });
+    p.on("error", reject);
+    p.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} ${code}: ${err.slice(-400)}`))));
+  });
+}
+
+async function mediaSeconds(path: string): Promise<number> {
+  const out = await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path]);
+  const sec = Number.parseFloat(out.trim());
+  if (!Number.isFinite(sec)) throw new Error(`ffprobe: no duration for ${path}`);
+  return sec;
+}
+
+/** Join clips with short crossfades (clips share size/fps: same source photo). */
+async function crossfade(clips: string[], out: string): Promise<void> {
+  if (clips.length === 1) {
+    await run("ffmpeg", ["-v", "error", "-y", "-i", clips[0]!, "-an", "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", out]);
+    return;
+  }
+  const durs = await Promise.all(clips.map(mediaSeconds));
+  const parts: string[] = [];
+  let prev = "[0:v]";
+  let offset = 0;
+  for (let i = 1; i < clips.length; i++) {
+    offset += durs[i - 1]! - XFADE_SEC;
+    const label = i === clips.length - 1 ? "[v]" : `[x${i}]`;
+    parts.push(`${prev}[${i}:v]xfade=transition=fade:duration=${XFADE_SEC}:offset=${offset.toFixed(3)}${label}`);
+    prev = label;
+  }
+  await run("ffmpeg", [
+    "-v", "error", "-y",
+    ...clips.flatMap((c) => ["-i", c]),
+    "-filter_complex", parts.join(";"),
+    "-map", "[v]", "-an", "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p",
+    out,
+  ]);
+}
+
+/**
+ * Fit `video` to the voice (boomerang-loop if short), place it on a
+ * 1080x1920 canvas over a blurred fill, and mux the voice. Ends 0.6 s after the voice.
+ */
+async function finalize(video: string, voice: string, voiceSec: number, out: string): Promise<void> {
+  const vidSec = await mediaSeconds(video);
+  const targetSec = voiceSec + 0.6;
+  const fit =
+    vidSec >= targetSec
+      ? "[0:v]null[src]"
+      : `[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0,` +
+        `loop=loop=${Math.ceil(targetSec / (vidSec * 2))}:size=32767:start=0,setpts=N/FRAME_RATE/TB[src]`;
+  const canvas =
+    "[src]split[bg][fg];" +
+    "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2,eq=brightness=-0.06[bgb];" +
+    "[fg]scale=1080:-2:flags=lanczos[fgs];" +
+    "[bgb][fgs]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]";
+  await run("ffmpeg", [
+    "-v", "error", "-y",
+    "-i", video,
+    "-i", voice,
+    "-filter_complex", `${fit};${canvas};[1:a]apad=pad_dur=0.6[a]`,
+    "-map", "[v]", "-map", "[a]",
+    "-t", targetSec.toFixed(2),
+    "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+    "-c:a", "aac", "-b:a", "160k",
+    "-movflags", "+faststart",
+    out,
+  ]);
+}
+
+export async function makeVoicedProductVideo(productId: number): Promise<VoicedVideoResult> {
+  const content = await writeVideoContent(productId);
+  log.info({ productId, voiceover: content.voiceover, variantId: content.variantId }, "content ready");
+
+  const voice = await generateVoice({
+    text: content.voiceover,
+    fileName: `video-${productId}-${Date.now()}`,
+    allowLiveInDryRun: true,
+    stability: 0.45,
+    style: 0.25,
+    task: "voice_gen.video_voiceover",
+  });
+  const voiceSec = await mediaSeconds(voice.filePath);
+  if (voice.dryRun) log.warn({ productId }, "ElevenLabs not configured — using a silent placeholder voice");
+
+  // Split the voice length across the shots (each clip ≤5 s on a 3060).
+  const perClip = Math.min(MAX_CLIP_SEC, Math.max(3, Math.ceil((voiceSec + 0.6) / content.shots.length + XFADE_SEC)));
+  const clipPaths: string[] = [];
+  for (const [i, prompt] of content.shots.entries()) {
+    log.info({ productId, shot: i + 1, of: content.shots.length, seconds: perClip }, "generating shot");
+    const clip = await generateProductVideo({ productId, style: "product", prompt, seconds: perClip });
+    clipPaths.push(clip.path);
+  }
+
+  await mkdir(OUTPUT_DIR, { recursive: true });
+  const stamp = Date.now();
+  const joined = join(OUTPUT_DIR, `product-${productId}-shots-${stamp}.mp4`);
+  await crossfade(clipPaths, joined);
+  const out = join(OUTPUT_DIR, `product-${productId}-video-${stamp}-1080x1920.mp4`);
+  await finalize(joined, voice.filePath, voiceSec, out);
+  log.info({ productId, out, voiceSec }, "voiced product video ready");
+
+  return { path: out, content, voicePath: voice.filePath, voiceSec, voiceDryRun: voice.dryRun, clipPaths };
+}

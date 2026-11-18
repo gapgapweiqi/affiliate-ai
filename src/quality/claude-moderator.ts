@@ -58,7 +58,7 @@ export async function moderateContent(text: string): Promise<ModerationResult> {
       tier: "fast",
       system: MODERATOR_SYSTEM,
       prompt: `Text to review:\n\n${text}`,
-      maxTokens: 400,
+      maxTokens: 3000, // Haiku 5.5 thinks before answering; 400 cut the JSON verdict mid-string
       temperature: 0.0,  // deterministic — same input → same verdict
       task: "quality_gate.moderation",
     });

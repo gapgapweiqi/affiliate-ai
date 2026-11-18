@@ -35,18 +35,37 @@ interface ParsedVariant {
 /**
  * Extract first JSON object from Claude response (handles trailing commentary).
  */
-function extractJson<T>(text: string): T | null {
+export function extractJson<T>(text: string): T | null {
   const cleaned = text.replace(/^```(?:json)?\s*/i, "");
   const start = cleaned.indexOf("{");
   if (start === -1) return null;
+  // Walk the object string-aware: braces inside string values don't count,
+  // and raw newlines/tabs inside strings (Claude often emits multi-line
+  // captions unescaped) are escaped so JSON.parse accepts them.
   let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let out = "";
   for (let i = start; i < cleaned.length; i++) {
-    if (cleaned[i] === "{") depth++;
-    else if (cleaned[i] === "}") {
+    const ch = cleaned[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      else if (ch === "\n") { out += "\\n"; continue; }
+      else if (ch === "\r") { out += "\\r"; continue; }
+      else if (ch === "\t") { out += "\\t"; continue; }
+      out += ch;
+      continue;
+    }
+    out += ch;
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
       depth--;
       if (depth === 0) {
         try {
-          return JSON.parse(cleaned.slice(start, i + 1)) as T;
+          return JSON.parse(out) as T;
         } catch {
           return null;
         }
@@ -163,7 +182,7 @@ export async function generateVariants(
         tier: "fast",
         system,
         prompt: user,
-        maxTokens: 600,
+        maxTokens: 1500, // Thai is token-heavy; 600 truncated captions mid-JSON
         temperature: 0.85, // higher = more variety across A/B/C
         task: `variant_caption.${opts.channel}`,
       });

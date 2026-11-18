@@ -4,7 +4,7 @@
  * Thai TTS for video narration. Uses ELEVENLABS_VOICE_ID (set after
  * uploading a 3-5min sample of operator's voice as a Voice Clone).
  *
- * Model: eleven_multilingual_v3 — supports Thai natively, decent prosody.
+ * Model: env ELEVENLABS_MODEL (default eleven_v3 — supports Thai).
  *
  * Cost: ~$0.30 per 1K chars on Starter plan ($22/mo = ~70K chars/mo).
  * For 30s scripts (~250 Thai chars), that's ~$0.075 per video voice.
@@ -43,6 +43,12 @@ export interface GenerateVoiceOptions {
   /** Speaker style 0-1 — exaggeration. */
   style?: number;
   forceDryRun?: boolean;
+  /**
+   * Call ElevenLabs even when DEBUG_DRY_RUN=true. DEBUG_DRY_RUN exists to
+   * stop public side effects (posting); a TTS call only costs credits, and
+   * a silent placeholder makes dry-run videos useless to review.
+   */
+  allowLiveInDryRun?: boolean;
   task?: string;
 }
 
@@ -73,7 +79,11 @@ export async function generateVoice(opts: GenerateVoiceOptions): Promise<VoiceRe
   const start = Date.now();
   const charCount = opts.text.length;
   const estimatedAudioSec = Math.ceil(charCount / 12); // ~12 chars/sec for Thai TTS
-  const dryRun = opts.forceDryRun || env.DEBUG_DRY_RUN || !env.ELEVENLABS_API_KEY || !env.ELEVENLABS_VOICE_ID;
+  const dryRun =
+    opts.forceDryRun ||
+    (env.DEBUG_DRY_RUN && !opts.allowLiveInDryRun) ||
+    !env.ELEVENLABS_API_KEY ||
+    !env.ELEVENLABS_VOICE_ID;
 
   // Output path
   const fileName = opts.fileName ?? `voice_${await hashText(opts.text)}`;

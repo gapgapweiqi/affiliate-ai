@@ -8,7 +8,10 @@ import { z } from "zod";
 
 config({ path: ".env" });
 
-const optStr = z.string().optional().or(z.literal("").transform(() => undefined));
+/** Domains are used as `https://${host}/...` — accept "https://x.com/ " too. */
+const normalizeHost = (v: string) => v.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+
+const optStr =z.string().optional().or(z.literal("").transform(() => undefined));
 const boolish = z
   .string()
   .optional()
@@ -16,7 +19,7 @@ const boolish = z
 
 const envSchema = z.object({
   // Core
-  DOMAIN_NAME: z.string().default("example.com"),
+  DOMAIN_NAME: z.string().default("example.com").transform(normalizeHost),
   NODE_ENV: z.enum(["development", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   TIMEZONE: z.string().default("Asia/Bangkok"),
@@ -51,7 +54,7 @@ const envSchema = z.object({
 
   ELEVENLABS_API_KEY: optStr,
   ELEVENLABS_VOICE_ID: optStr,
-  ELEVENLABS_MODEL: z.string().default("eleven_multilingual_v3"),
+  ELEVENLABS_MODEL: z.string().default("eleven_v3"), // Thai-capable; eleven_multilingual_v3 does not exist
 
   REPLICATE_API_TOKEN: optStr,
   FLUX_API_KEY: optStr,
@@ -68,7 +71,7 @@ const envSchema = z.object({
 
   // Public site config (used by site builder + deployer).
   // Override these in your .env to point at your own domain.
-  SITE_DOMAIN: z.string().default("example.com"),
+  SITE_DOMAIN: z.string().default("example.com").transform(normalizeHost),
   SITE_NAME: z.string().default("Affiliate AI"),
   SITE_OUT_DIR: z.string().default("./dist"),
   /** Set true to auto-deploy to Cloudflare Pages after every site rebuild. */
@@ -89,6 +92,10 @@ const envSchema = z.object({
   GOOGLE_OAUTH_REFRESH_TOKEN: optStr,
   GOOGLE_SEARCH_CONSOLE_PROPERTY: optStr,
   BING_INDEXNOW_KEY: optStr,
+
+  // Local video generation (tools/wangp-server on the host GPU)
+  WANGP_URL: optStr,
+  WANGP_PRESENTER_FILE: optStr,  // image in the server's output dir, e.g. presenter-default.jpg
 
   // Social
   META_APP_ID: optStr,
@@ -114,6 +121,7 @@ const envSchema = z.object({
   SCRAPE_KEYWORDS_PER_RUN: z.coerce.number().int().positive().default(4),
   SCRAPE_PRODUCTS_PER_KEYWORD: z.coerce.number().int().positive().default(15),
   CRON_SCRAPE_PRODUCTS: z.string().default("0 8,13,19,22 * * *"),
+  CRON_VIDEO_POST: z.string().default("30 22 * * *"),
 
   // Budget caps
   // Per-channel daily post caps (V2 vision safeguard against bot-detection)
