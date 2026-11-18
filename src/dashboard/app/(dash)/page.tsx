@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LineChart, COLORS } from "@/components/charts";
+import { LineChart } from "@/components/charts";
 import { Badge, Card, Kpi, PageHeader, statusColor, truncate } from "@/components/ui";
 import { ago, baht, num, usd } from "@/lib/format";
 import { getDailySeries, getLastScrape, getOpenAlerts, getRecentPosts, getSnapshotKpis } from "@/lib/queries";
@@ -33,16 +33,24 @@ export default async function SnapshotPage() {
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-3">
-        <Card title="14 วันล่าสุด" subtitle="คลิก (ไม่รวมบอท) · สินค้าใหม่ · โพสต์จริง" className="xl:col-span-2">
-          <LineChart
-            data={series as unknown as Record<string, unknown>[]}
-            x="day"
-            series={[
-              { key: "clicks", label: "คลิก", color: COLORS.blue },
-              { key: "newProducts", label: "สินค้าใหม่", color: COLORS.teal },
-              { key: "posts", label: "โพสต์", color: COLORS.amber },
-            ]}
-          />
+        <Card title="14 วันล่าสุด" subtitle="แยกกราฟละตัวชี้วัด เพราะสเกลต่างกันมาก" className="xl:col-span-2">
+          <div className="grid gap-4 md:grid-cols-3">
+            {[
+              { key: "clicks", label: "คลิก (ไม่รวมบอท)", slot: 0 },
+              { key: "newProducts", label: "สินค้าใหม่", slot: 1 },
+              { key: "posts", label: "โพสต์จริง", slot: 2 },
+            ].map((m) => (
+              <div key={m.key}>
+                <div className="mb-1 text-xs font-medium text-slate-600">{m.label}</div>
+                <LineChart
+                  data={series as unknown as Record<string, unknown>[]}
+                  x="day"
+                  height={180}
+                  series={[{ key: m.key, label: m.label, slot: m.slot }]}
+                />
+              </div>
+            ))}
+          </div>
         </Card>
 
         <Card title="แจ้งเตือนที่ยังไม่ปิด">

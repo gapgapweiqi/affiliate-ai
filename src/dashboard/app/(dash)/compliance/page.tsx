@@ -1,4 +1,4 @@
-import { BarChart, COLORS } from "@/components/charts";
+import { BarChart } from "@/components/charts";
 import { Badge, Card, PageHeader, Table, Td, truncate } from "@/components/ui";
 import { baht, dateTime, pct } from "@/lib/format";
 import { deactivateVariant, setProductBlacklist } from "../../actions";
@@ -26,7 +26,7 @@ export default async function CompliancePage() {
               x="kind"
               horizontal
               height={Math.max(160, issues.length * 36)}
-              series={[{ key: "n", label: "ครั้ง", color: COLORS.rose }]}
+              series={[{ key: "n", label: "ครั้ง" }]}
             />
           )}
         </Card>

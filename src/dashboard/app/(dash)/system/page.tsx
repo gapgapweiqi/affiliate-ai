@@ -1,4 +1,4 @@
-import { BarChart, COLORS } from "@/components/charts";
+import { BarChart } from "@/components/charts";
 import { Badge, Card, PageHeader, Table, Td, statusColor, truncate } from "@/components/ui";
 import { ago, dateTime, num, usd } from "@/lib/format";
 import { getLastScrape, getLlmSpendByTask, getScraperRuns, getSpendSeries, getTableCounts } from "@/lib/queries";
@@ -90,8 +90,8 @@ export default async function SystemPage() {
           stacked
           valuePrefix="$"
           series={[
-            { key: "llm", label: "Claude", color: COLORS.blue },
-            { key: "scrape", label: "Apify", color: COLORS.teal },
+            { key: "llm", label: "Claude" },
+            { key: "scrape", label: "Apify" },
           ]}
         />
       </Card>

@@ -1,4 +1,4 @@
-import { BarChart, COLORS } from "@/components/charts";
+import { BarChart } from "@/components/charts";
 import { Card, Kpi, PageHeader, Table, Td, truncate } from "@/components/ui";
 import { baht, num, NICHE_LABEL, pct } from "@/lib/format";
 import { getChannelPerformance, getTopProductsByClicks } from "@/lib/queries";
@@ -30,8 +30,8 @@ export default async function RevenuePage() {
             data={channels as unknown as Record<string, unknown>[]}
             x="channel"
             series={[
-              { key: "clicks", label: "คลิกทั้งหมด", color: COLORS.blue },
-              { key: "uniqueClicks", label: "Unique", color: COLORS.teal },
+              { key: "clicks", label: "คลิกทั้งหมด" },
+              { key: "uniqueClicks", label: "Unique" },
             ]}
           />
         </Card>

@@ -1,4 +1,4 @@
-import { BarChart, COLORS } from "@/components/charts";
+import { BarChart } from "@/components/charts";
 import { Badge, Card, PageHeader, Table, Td, statusColor, truncate } from "@/components/ui";
 import { dateTime, num, pct } from "@/lib/format";
 import { getPostStatusCounts, getRecentPosts, getVariantStatsByAngle } from "@/lib/queries";
@@ -22,8 +22,8 @@ export default async function ContentPage() {
             x="name"
             stacked
             series={[
-              { key: "approved", label: "ผ่าน", color: COLORS.teal },
-              { key: "rejected", label: "ไม่ผ่าน", color: COLORS.rose },
+              { key: "approved", label: "ผ่าน" },
+              { key: "rejected", label: "ไม่ผ่าน" },
             ]}
           />
         </Card>

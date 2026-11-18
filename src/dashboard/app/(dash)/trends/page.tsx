@@ -1,4 +1,4 @@
-import { BarChart, COLORS } from "@/components/charts";
+import { BarChart } from "@/components/charts";
 import { Badge, Card, PageHeader, Table, Td, truncate } from "@/components/ui";
 import { ago, baht, num, NICHE_LABEL, pct } from "@/lib/format";
 import { getNicheBreakdown, getOpportunities, getRecentPromoEvents } from "@/lib/queries";
@@ -26,8 +26,8 @@ export default async function TrendsPage() {
             horizontal
             height={Math.max(180, nicheData.length * 40)}
             series={[
-              { key: "products", label: "สินค้า", color: COLORS.blue },
-              { key: "clicks30d", label: "คลิก 30 วัน", color: COLORS.amber },
+              { key: "products", label: "สินค้า" },
+              { key: "clicks30d", label: "คลิก 30 วัน" },
             ]}
           />
         </Card>
