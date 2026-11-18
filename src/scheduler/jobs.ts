@@ -15,6 +15,7 @@ import { pickKeywords, pickKeywordsWeighted } from "../scraper/niches.ts";
 import { runLearningOptimizer } from "../brain/learning.ts";
 import { runPromoHunter } from "../brain/promo-hunter.ts";
 import { runPromoTrigger } from "../brain/promo-trigger.ts";
+import { rescoreProducts } from "../brain/product-scorer.ts";
 import { runEngagementTracker } from "../engagement/tracker.ts";
 import { runSourceHealthCheck } from "../monitoring/source-health.ts";
 import { runDailyReport } from "../monitoring/daily-report.ts";
@@ -71,6 +72,16 @@ export async function jobScrapeTrending(): Promise<void> {
     { totalSucceeded, totalNew, totalCostUsd: totalCost.toFixed(4) },
     "scrapeTrending done",
   );
+  await rescoreSafely();
+}
+
+/** Recompute products.final_score; never fails the calling job. */
+async function rescoreSafely(): Promise<void> {
+  try {
+    await rescoreProducts();
+  } catch (err) {
+    log.error({ err: errMsg(err) }, "rescoreProducts failed");
+  }
 }
 
 /**
@@ -110,6 +121,7 @@ export async function jobScrapeTikTokShop(): Promise<void> {
       log.error({ keyword, err: errMsg(err) }, "tiktok shop scrape failed");
     }
   }
+  await rescoreSafely();
 }
 
 /**
@@ -119,6 +131,7 @@ export async function jobScrapeTikTokShop(): Promise<void> {
 export async function jobLearningOptimizer(): Promise<void> {
   const result = await runLearningOptimizer({ windowDays: 1 });
   log.info(result, "learningOptimizer done");
+  await rescoreSafely();
 }
 
 /**
