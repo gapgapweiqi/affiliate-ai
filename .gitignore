@@ -5,6 +5,12 @@ dist/
 logs/
 .env
 .env.local
+# backups and DB dumps hold secrets/data — never commit
+.env.bak*
+.env.*.bak
+*.bak
+*.dump
+*.sql.gz
 secrets/
 *.pem
 *.key
