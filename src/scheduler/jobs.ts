@@ -180,8 +180,12 @@ export async function jobLearningOptimizer(): Promise<void> {
  * target languages. Idempotent — already-translated products are skipped.
  * Triggers a site rebuild on success so EN/ZH/JA visitors stop seeing
  * Thai fallback as soon as new translations land.
+ *
+ * Off unless FEATURE_AUTO_TRANSLATE=true: translations only feed the
+ * product website's EN/ZH/JA pages, not the Thai social posts.
  */
 export async function jobBackfillTranslations(): Promise<void> {
+  if (!env.FEATURE_AUTO_TRANSLATE) return;
   const result = await translateMissingProducts({ limit: 20 });
   log.info(result, "backfillTranslations done");
 }

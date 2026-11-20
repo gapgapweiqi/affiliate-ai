@@ -98,7 +98,7 @@ const SCHEDULES: JobSchedule[] = [
   {
     name: "backfillTranslations",
     cron: "*/45 * * * *",
-    description: "Translate products missing EN/ZH/JA (limit 20/run, idempotent)",
+    description: "Translate products missing EN/ZH/JA for the website (only when FEATURE_AUTO_TRANSLATE=true)",
     handler: jobBackfillTranslations,
   },
   {
