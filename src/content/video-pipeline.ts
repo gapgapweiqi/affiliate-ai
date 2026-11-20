@@ -22,6 +22,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "../lib/db.ts";
 import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
+import { makeCatScene } from "./cat-scene.ts";
 import { generateKlingClip } from "./fal-kling.ts";
 import { type VideoContent, writeVideoContent } from "./video-script.ts";
 import { generateVoice } from "./voice-generator.ts";
@@ -52,7 +53,14 @@ export interface VoicedVideoResult {
   voiceSec: number;
   voiceDryRun: boolean;  // true = silent placeholder (no ElevenLabs key)
   clipPaths: string[];
+  /** "cat" when the orange-cat scene was used, else "product". */
+  style: "product" | "cat";
+  scenePath?: string;
 }
+
+/** Used when the cat scene can't be made: the Sonnet shot was written for the cat. */
+const PLAIN_KLING_SHOT =
+  "Slow, smooth camera push-in on the product, centered and fully in frame. It turns gently while a soft light sweep glides across its surface with subtle glints. Faint bokeh in the background. The product keeps exactly the same shape, color, logo and printed text. No hands, no people, no new objects.";
 
 function run(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -114,8 +122,18 @@ async function finalize(video: string, voice: string, voiceSec: number, out: str
       ? "[0:v]null[src]"
       : `[0:v]split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0,` +
         `loop=loop=${Math.ceil(targetSec / (vidSec * 2))}:size=32767:start=0,setpts=N/FRAME_RATE/TB[src]`;
-  const canvas =
-    "[src]split[bg][fg];" +
+  // Footage that is already ~9:16 (cat scenes) fills the frame; square
+  // Shopee footage sits on a blurred, zoomed copy of itself.
+  const [w, h] = (
+    await run("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", video])
+  )
+    .trim()
+    .split(",")
+    .map(Number);
+  const tall = w! > 0 && h! > 0 && w! / h! < 0.62;
+  const canvas = tall
+    ? "[src]scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,format=yuv420p[v]"
+    : "[src]split[bg][fg];" +
     "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2,eq=brightness=-0.06[bgb];" +
     "[fg]scale=1080:-2:flags=lanczos[fgs];" +
     "[bgb][fgs]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]";
@@ -136,7 +154,7 @@ async function finalize(video: string, voice: string, voiceSec: number, out: str
 export async function makeVoicedProductVideo(productId: number): Promise<VoicedVideoResult> {
   const provider = videoProvider();
   if (!provider) throw new Error("no video provider configured (set FAL_KEY or WANGP_URL)");
-  const content = await writeVideoContent(productId, { provider });
+  const content = await writeVideoContent(productId, { provider, style: env.VIDEO_STYLE });
   log.info({ productId, voiceover: content.voiceover, variantId: content.variantId }, "content ready");
 
   const voice = await generateVoice({
@@ -151,6 +169,8 @@ export async function makeVoicedProductVideo(productId: number): Promise<VoicedV
   if (voice.dryRun) log.warn({ productId }, "ElevenLabs not configured — using a silent placeholder voice");
 
   const clipPaths: string[] = [];
+  let style: VoicedVideoResult["style"] = "product";
+  let scenePath: string | undefined;
   if (provider === "kling") {
     const [p] = await db
       .select({ image: schema.products.primaryImage })
@@ -160,8 +180,25 @@ export async function makeVoicedProductVideo(productId: number): Promise<VoicedV
     if (!p?.image) throw new Error(`product ${productId} has no image`);
     // One continuous 10 s shot; the script is written to fit inside it.
     const seconds = voiceSec + 0.6 <= 5 ? 5 : 10;
-    log.info({ productId, provider, seconds }, "generating Kling clip");
-    const clip = await generateKlingClip({ productId, imageUrl: p.image, prompt: content.shots[0]!, seconds });
+    let imageUrl = p.image;
+    let prompt = content.shots[0]!;
+    let negativePrompt: string | undefined;
+    if (content.cat) {
+      try {
+        const scene = await makeCatScene({ productId, imageUrl: p.image, ...content.cat });
+        imageUrl = scene.url;
+        scenePath = scene.path;
+        style = "cat";
+        negativePrompt =
+          "changed product, distorted product, garbled text, extra cats, two cats, human hands, people, cat touching the product, blur, low quality, watermark";
+      } catch (err) {
+        // e.g. the image model's content checker refused: fall back to the plain photo.
+        log.warn({ productId, err: err instanceof Error ? err.message : String(err) }, "cat scene failed — plain product video");
+        prompt = PLAIN_KLING_SHOT;
+      }
+    }
+    log.info({ productId, provider, seconds, style }, "generating Kling clip");
+    const clip = await generateKlingClip({ productId, imageUrl, prompt, seconds, negativePrompt });
     clipPaths.push(clip.path);
   } else {
     // Split the voice length across the shots (each clip ≤5 s on a 3060).
@@ -181,5 +218,5 @@ export async function makeVoicedProductVideo(productId: number): Promise<VoicedV
   await finalize(joined, voice.filePath, voiceSec, out);
   log.info({ productId, out, voiceSec }, "voiced product video ready");
 
-  return { provider, path: out, content, voicePath: voice.filePath, voiceSec, voiceDryRun: voice.dryRun, clipPaths };
+  return { provider, path: out, content, voicePath: voice.filePath, voiceSec, voiceDryRun: voice.dryRun, clipPaths, style, scenePath };
 }

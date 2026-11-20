@@ -35,6 +35,15 @@ export interface VideoContent {
   gateApproved: boolean;
   gateIssues: string[];
   costUsd: number;
+  /** Cat-style scene (VIDEO_STYLE=cat); null when the product isn't a good fit. */
+  cat: CatIdea | null;
+}
+
+export interface CatIdea {
+  /** Short English name of the product, e.g. "a Philips steam iron". */
+  productType: string;
+  /** English: what the orange cat does in the background, and where. */
+  scene: string;
 }
 
 interface Parsed {
@@ -42,6 +51,7 @@ interface Parsed {
   shots: string[];
   caption: string;
   hashtags?: string[];
+  cat?: { ok?: boolean; product_type?: string; scene?: string } | null;
 }
 
 /**
@@ -51,7 +61,17 @@ interface Parsed {
  */
 export interface ShotPlan {
   provider: "kling" | "wangp";
+  /** cat: product in front, orange cat acting out its use behind (Kling only). */
+  style?: "product" | "cat";
 }
+
+const CAT_TEXT = `2) "cat" — a fun background scene for this product, and "shots" — its motion.
+The video photo is rebuilt by an image model: the product stands unchanged in the FOREGROUND, and in the softly blurred BACKGROUND one cute fluffy orange tabby cat acts out using that kind of product, in a matching setting (an iron → the cat ironing a shirt in a laundry room; an air fryer → the cat frying a fish in a kitchen; earbuds → the cat bobbing its head to music on a sofa; sunscreen → the cat lounging under a beach umbrella).
+- "cat": {"ok": true/false, "product_type": "<short English name of the product, e.g. a Philips steam iron>", "scene": "<English, 25-45 words: what the cat is doing, what it holds, the setting and light>"}.
+- The cat uses its own small prop (its own iron, its own pan); it never touches, eats or sits on the foreground product.
+- "ok": false when a cat scene would be unsafe, misleading or in poor taste: medicine, supplements, health or medical devices, adult products, weapons, baby food or formula, pet food for animals other than cats, or a product the cat would have to eat or wear on its body. Then still fill "shots" as a plain product shot.
+- "shots": exactly 1 English prompt (35-60 words) for a 5-10 second image-to-video clip of that scene: the cat's action continues with 2-3 small beats (e.g. ironing back and forth, a puff of steam, then it looks at the camera proudly); the foreground product stays perfectly still, sharp and unchanged; static camera or a very slow push-in.
+- The voiceover may open with a light, playful line about the cat, then sells the product as usual.`;
 
 const PLAN_TEXT: Record<ShotPlan["provider"], { voice: string; shots: string }> = {
   kling: {
@@ -70,13 +90,26 @@ const PLAN_TEXT: Record<ShotPlan["provider"], { voice: string; shots: string }> 
   },
 };
 
-function buildSystem(plan: ShotPlan): string {
-  const t = PLAN_TEXT[plan.provider];
-  return SYSTEM_TEMPLATE.replace("{{VOICE_LENGTH}}", t.voice).replace("{{SHOTS}}", t.shots);
+function catStyle(plan: ShotPlan): boolean {
+  return plan.style === "cat" && plan.provider === "kling";
 }
 
+function buildSystem(plan: ShotPlan): string {
+  const t = PLAN_TEXT[plan.provider];
+  const cat = catStyle(plan);
+  return SYSTEM_TEMPLATE.replace("{{VOICE_LENGTH}}", t.voice)
+    .replace("{{SHOTS}}", cat ? CAT_TEXT : t.shots)
+    .replace("{{INTRO}}", cat ? INTRO_CAT : INTRO_PRODUCT)
+    .replace("{{JSON}}", cat ? JSON_CAT : JSON_PRODUCT);
+}
+
+const INTRO_PRODUCT = "The video shows ONLY the product (no people): its Shopee product photo is animated by an image-to-video model, with a Thai voiceover on top.";
+const INTRO_CAT = "The video shows the product in the foreground and a cute orange cat in the background acting out how the product is used (no people), animated by an image-to-video model, with a Thai voiceover on top.";
+const JSON_PRODUCT = `{"voiceover": "...", "shots": ["...", "..."], "caption": "...", "hashtags": ["#...", "..."]}`;
+const JSON_CAT = `{"voiceover": "...", "cat": {"ok": true, "product_type": "...", "scene": "..."}, "shots": ["..."], "caption": "...", "hashtags": ["#...", "..."]}`;
+
 const SYSTEM_TEMPLATE = `You are a senior Thai social-commerce copywriter. You create short vertical product videos for a Facebook page that sells Shopee products through affiliate links.
-The video shows ONLY the product (no people): its Shopee product photo is animated by an image-to-video model, with a Thai voiceover on top.
+{{INTRO}}
 
 Write three things:
 
@@ -98,7 +131,7 @@ Write three things:
 Hard rules for everything: only claim what the product data supports; no invented specs, no medical/health claims, no "ดีที่สุด"/"อันดับ 1", no fake urgency or fake scarcity.
 
 Return ONLY JSON:
-{"voiceover": "...", "shots": ["...", "..."], "caption": "...", "hashtags": ["#...", "..."]}`;
+{{JSON}}`;
 
 export async function writeVideoContent(
   productId: number,
@@ -162,6 +195,11 @@ export async function writeVideoContent(
   }
   if (!found) throw new Error("could not parse video content from Claude");
   const parsed: Parsed = found;
+  const cat: CatIdea | null =
+    catStyle(plan) && parsed.cat?.ok && parsed.cat.scene && parsed.cat.product_type
+      ? { productType: parsed.cat.product_type.trim(), scene: parsed.cat.scene.trim() }
+      : null;
+  if (catStyle(plan) && !cat) log.info({ productId }, "cat scene skipped for this product — plain product video");
 
   const caption = parsed.caption.includes(link.shortUrl)
     ? parsed.caption
@@ -211,5 +249,6 @@ export async function writeVideoContent(
     gateApproved: gate.approved,
     gateIssues: gate.approved ? [] : gate.issues,
     costUsd,
+    cat,
   };
 }

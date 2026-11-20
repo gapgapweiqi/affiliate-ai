@@ -22,6 +22,7 @@ import { db, schema } from "../lib/db.ts";
 import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
 import { errMsg, sleep } from "../lib/retry.ts";
+import { catPhotoForPost } from "../content/cat-scene.ts";
 import { publishToFacebook } from "./facebook.ts";
 import { publishToInstagram } from "./instagram.ts";
 import { publishToTikTok } from "./tiktok.ts";
@@ -132,7 +133,11 @@ export async function runAutoPublish(): Promise<AutoPublishResult> {
     // Publish — module picks variant via M3 bandit + handles dry-run gate
     try {
       let res;
-      if (channel === "facebook") res = await publishToFacebook({ productId: pick.productId });
+      if (channel === "facebook") {
+        // PHOTO_STYLE=cat: an orange-cat scene around the product; falls back to the Shopee photo.
+        const imageUrl = env.PHOTO_STYLE === "cat" ? ((await catPhotoForPost(pick.productId)) ?? undefined) : undefined;
+        res = await publishToFacebook({ productId: pick.productId, imageUrl });
+      }
       else if (channel === "instagram") res = await publishToInstagram({ productId: pick.productId });
       else res = await publishToTikTok({ productId: pick.productId });
 

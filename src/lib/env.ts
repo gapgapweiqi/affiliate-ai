@@ -113,6 +113,10 @@ const envSchema = z.object({
   FAL_KLING_MODEL: z.string().default("fal-ai/kling-video/v2.5-turbo/pro/image-to-video"),
   /** auto = Kling when FAL_KEY is set, else WanGP when WANGP_URL is set. */
   VIDEO_PROVIDER: z.enum(["auto", "kling", "wangp"]).default("auto"),
+  /** product = the Shopee photo animated; cat = product in front, an orange cat acting out its use behind (Kling only). */
+  VIDEO_STYLE: z.enum(["product", "cat"]).default("product"),
+  /** Facebook photo posts: product = the Shopee photo; cat = an orange-cat scene built around the product (needs FAL_KEY). */
+  PHOTO_STYLE: z.enum(["product", "cat"]).default("product"),
   WANGP_PRESENTER_FILE: optStr,  // image in the server's output dir, e.g. presenter-default.jpg
 
   // Social
