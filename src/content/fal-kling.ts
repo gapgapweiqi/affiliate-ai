@@ -46,9 +46,13 @@ export function falEnabled(): boolean {
   return Boolean(env.FAL_KEY);
 }
 
-/** Cost for one clip, from fal's published pricing for Kling 2.5 Turbo Pro. */
-export function klingCostUsd(seconds: number): number {
-  return 0.35 + Math.max(0, seconds - 5) * 0.07;
+/**
+ * Cost for one clip, from fal's published Kling 2.5 Turbo pricing:
+ * Pro $0.35 per 5 s + $0.07/s, Standard (720p) $0.21 per 5 s + $0.042/s.
+ */
+export function klingCostUsd(seconds: number, model: string = env.FAL_KLING_MODEL): number {
+  const [base, perSec] = model.includes("/standard/") ? [0.21, 0.042] : [0.35, 0.07];
+  return base + Math.max(0, seconds - 5) * perSec;
 }
 
 function headers(): Record<string, string> {
@@ -71,7 +75,7 @@ export async function generateKlingClip(opts: KlingClipOptions): Promise<KlingCl
   if (!env.FAL_KEY) throw new Error("FAL_KEY is not set");
   const model = env.FAL_KLING_MODEL;
   const started = Date.now();
-  const costUsd = klingCostUsd(opts.seconds);
+  const costUsd = klingCostUsd(opts.seconds, model);
 
   const [run] = await db
     .insert(schema.generationRuns)
