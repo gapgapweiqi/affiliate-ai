@@ -140,13 +140,23 @@ const envSchema = z.object({
   SCRAPE_PRODUCTS_PER_KEYWORD: z.coerce.number().int().positive().default(15),
   CRON_SCRAPE_PRODUCTS: z.string().default("0 8,13,19,22 * * *"),
   CRON_VIDEO_POST: z.string().default("30 22 * * *"),
+  /**
+   * Photo-post rounds, "HH:MM" (Bangkok) comma-separated. Each round posts at
+   * most one product per channel, still capped by DAILY_POSTS_*. Spread out:
+   * bursts of posts look spammy to Facebook and miss the noon/evening peaks.
+   */
+  PHOTO_POST_TIMES: z
+    .string()
+    .default("12:10,18:10,20:40")
+    .transform((v) => v.split(",").map((t) => t.trim()).filter(Boolean))
+    .refine((ts) => ts.every((t) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(t)), "PHOTO_POST_TIMES must be HH:MM,HH:MM,..."),
   CRON_DAILY_CAPTIONS: z.string().default("30 7 * * *"),
   CRON_SHOPEE_REPORT: z.string().default("20 */6 * * *"),
-  DAILY_CAPTION_PRODUCTS: z.coerce.number().int().min(0).default(5),
+  DAILY_CAPTION_PRODUCTS: z.coerce.number().int().min(0).default(3),
 
   // Budget caps
   // Per-channel daily post caps (V2 vision safeguard against bot-detection)
-  DAILY_POSTS_FACEBOOK: z.coerce.number().int().positive().default(5).optional(),
+  DAILY_POSTS_FACEBOOK: z.coerce.number().int().positive().default(3).optional(),
   DAILY_POSTS_INSTAGRAM: z.coerce.number().int().positive().default(5).optional(),
   DAILY_POSTS_TIKTOK: z.coerce.number().int().positive().default(3).optional(),
 

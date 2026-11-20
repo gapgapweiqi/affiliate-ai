@@ -12,7 +12,7 @@ import {
 type Channel = "facebook" | "instagram" | "tiktok";
 
 const CHANNELS: { key: Channel; label: string; capEnv: string; capDefault: number }[] = [
-  { key: "facebook", label: "Facebook", capEnv: "DAILY_POSTS_FACEBOOK", capDefault: 5 },
+  { key: "facebook", label: "Facebook", capEnv: "DAILY_POSTS_FACEBOOK", capDefault: 3 },
   { key: "instagram", label: "Instagram", capEnv: "DAILY_POSTS_INSTAGRAM", capDefault: 5 },
   { key: "tiktok", label: "TikTok", capEnv: "DAILY_POSTS_TIKTOK", capDefault: 3 },
 ];
@@ -144,12 +144,20 @@ function QueueTable({ items, showPromo, nextLabel }: { items: QueueItem[]; showP
 }
 
 export default async function QueuePage() {
-  const photoCron = "10,40 8-22 * * *"; // src/scheduler/index.ts autoPublish
+  // Photo rounds = PHOTO_POST_TIMES (src/scheduler/index.ts registers one job per time).
+  const photoTimes = (process.env.PHOTO_POST_TIMES || "12:10,18:10,20:40").split(",").map((t) => t.trim()).filter(Boolean);
   const videoCron = process.env.CRON_VIDEO_POST || "30 22 * * *";
   const captionCron = process.env.CRON_DAILY_CAPTIONS || "30 7 * * *";
-  const captionCount = Number(process.env.DAILY_CAPTION_PRODUCTS ?? 5);
+  const captionCount = Number(process.env.DAILY_CAPTION_PRODUCTS ?? 3);
   const nextCaptions = nextRun(captionCron);
-  const nextPhoto = nextRun(photoCron);
+  const nextPhoto =
+    photoTimes
+      .map((t) => {
+        const [h, m] = t.split(":");
+        return nextRun(`${Number(m)} ${Number(h)} * * *`);
+      })
+      .filter((d): d is Date => d !== null)
+      .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
   const nextVideo = nextRun(videoCron);
 
   const [fbQueue, igQueue, ttQueue, cooling, today, videoQueue, captionNext] = await Promise.all([
@@ -208,7 +216,7 @@ export default async function QueuePage() {
 
       <Card
         title="Facebook — โพสต์รูป + caption"
-        subtitle={`รอบละ 1 สินค้า ทุก :10 และ :40 (08:00–22:00) · ต้องมี caption ที่ผ่าน Quality Gate และไม่ได้โพสต์ใน 24 ชม.`}
+        subtitle={`รอบละ 1 สินค้า เวลา ${photoTimes.join(", ")} น. · ต้องมี caption ที่ผ่าน Quality Gate และไม่ได้โพสต์ใน 24 ชม.`}
         className="mt-6"
       >
         <QueueTable items={fbQueue} showPromo nextLabel={nextPhoto ? bkkLabel(nextPhoto) : "–"} />
