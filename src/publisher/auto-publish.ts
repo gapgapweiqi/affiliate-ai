@@ -42,7 +42,9 @@ const DAILY_LIMITS: Record<ActivePlatform, number> = {
 const MIN_DELAY_SEC = 30;        // randomize between this and MAX
 const MAX_DELAY_SEC = 5 * 60;    // up to 5 min so cron tick still completes
 
-const ACTIVE_CHANNELS: ActivePlatform[] = ["facebook", "instagram", "tiktok"];
+// TikTok is video-only: it is posted by the daily video job (auto-video.ts),
+// never from these photo rounds.
+const ACTIVE_CHANNELS: ActivePlatform[] = ["facebook", "instagram"];
 
 export interface AutoPublishResult {
   channelsAttempted: number;

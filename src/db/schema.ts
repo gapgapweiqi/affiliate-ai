@@ -699,3 +699,21 @@ export const affiliateConversions = pgTable(
     productIdx: index("affiliate_conversions_product_idx").on(t.productId),
   }),
 );
+
+/* ===================================================================
+ * OAUTH TOKENS
+ * Short-lived platform tokens the system refreshes on its own (TikTok
+ * access tokens last ~24 h), so they can't live in .env. One row per
+ * provider; the latest access/refresh pair overwrites the previous one.
+ * =================================================================== */
+
+export const oauthTokens = pgTable("oauth_tokens", {
+  provider: varchar("provider", { length: 32 }).primaryKey(), // "tiktok"
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  accountId: varchar("account_id", { length: 128 }), // TikTok open_id
+  scope: text("scope"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  refreshExpiresAt: timestamp("refresh_expires_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});

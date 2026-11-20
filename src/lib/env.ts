@@ -127,6 +127,8 @@ const envSchema = z.object({
   TIKTOK_ACCESS_TOKEN: optStr,
   TIKTOK_REFRESH_TOKEN: optStr,
   TIKTOK_OPEN_ID: optStr,
+  /** Must match the Login Kit redirect URI in the TikTok app (any https URL you control; it may 404). */
+  TIKTOK_REDIRECT_URI: optStr,
 
   // Operations
   RESEND_API_KEY: optStr,
@@ -152,6 +154,7 @@ const envSchema = z.object({
     .refine((ts) => ts.every((t) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(t)), "PHOTO_POST_TIMES must be HH:MM,HH:MM,..."),
   CRON_DAILY_CAPTIONS: z.string().default("30 7 * * *"),
   CRON_SHOPEE_REPORT: z.string().default("20 */6 * * *"),
+  CRON_TIKTOK_TOKEN_REFRESH: z.string().default("45 3 * * *"),
   DAILY_CAPTION_PRODUCTS: z.coerce.number().int().min(0).default(3),
 
   // Budget caps

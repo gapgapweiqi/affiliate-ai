@@ -28,6 +28,7 @@ import {
   jobAutoVideoPost,
   jobDailyCaptions,
   jobShopeeReport,
+  jobTikTokTokenRefresh,
 } from "./jobs.ts";
 
 const log = child("scheduler");
@@ -122,6 +123,12 @@ const SCHEDULES: JobSchedule[] = [
       handler: jobAutoPublish,
     };
   }),
+  {
+    name: "tiktokTokenRefresh",
+    cron: env.CRON_TIKTOK_TOKEN_REFRESH,
+    description: "Refresh the saved TikTok OAuth token (no-op until TikTok is authorized)",
+    handler: jobTikTokTokenRefresh,
+  },
   {
     name: "shopeeReport",
     cron: env.CRON_SHOPEE_REPORT,

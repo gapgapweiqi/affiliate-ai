@@ -18,6 +18,7 @@ import { runPromoHunter } from "../brain/promo-hunter.ts";
 import { runPromoTrigger } from "../brain/promo-trigger.ts";
 import { runDailyCaptions } from "../brain/daily-captions.ts";
 import { runShopeeReport } from "../affiliate/shopee-report.ts";
+import { refreshTikTokToken } from "../publisher/tiktok-auth.ts";
 import { rescoreProducts } from "../brain/product-scorer.ts";
 import { runEngagementTracker } from "../engagement/tracker.ts";
 import { runSourceHealthCheck } from "../monitoring/source-health.ts";
@@ -94,6 +95,16 @@ async function rescoreSafely(): Promise<void> {
 export async function jobDailyCaptions(): Promise<void> {
   const r = await runDailyCaptions({ count: env.DAILY_CAPTION_PRODUCTS });
   log.info(r, "dailyCaptions done");
+}
+
+/**
+ * Keep the saved TikTok token fresh even on days nothing is posted
+ * (access ~24 h, refresh token ~1 year — refreshing extends it).
+ */
+export async function jobTikTokTokenRefresh(): Promise<void> {
+  if (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET) return;
+  const r = await refreshTikTokToken();
+  log.info({ refreshed: Boolean(r), expiresAt: r?.expiresAt }, "tiktokTokenRefresh done");
 }
 
 /**
