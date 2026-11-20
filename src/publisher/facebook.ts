@@ -191,7 +191,7 @@ let pageTokenCache: { configured: string; page: string } | null = null;
  * user token does not expire. If the lookup returns nothing, the configured
  * token is already a Page token.
  */
-async function resolvePageToken(pageId: string, configured: string): Promise<string> {
+export async function resolvePageToken(pageId: string, configured: string): Promise<string> {
   if (pageTokenCache?.configured === configured) return pageTokenCache.page;
   let page = configured;
   try {

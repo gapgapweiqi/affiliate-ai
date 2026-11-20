@@ -28,6 +28,7 @@ import { db, schema } from "../lib/db.ts";
 import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
 import { errMsg, retry } from "../lib/retry.ts";
+import { resolvePageToken } from "../publisher/facebook.ts";
 
 const log = child("engagement.tracker");
 const GRAPH_BASE = "https://graph.facebook.com/v21.0";
@@ -66,39 +67,74 @@ const EMPTY: EngagementMetrics = {
  * Per-platform fetchers — return null if platform isn't configured (dry-run).
  * ---------------------------------------------------------------------------*/
 
+/**
+ * Facebook Page post metrics. Works with a Page token or an admin's user
+ * token (exchanged for the Page token), for photo/text posts (id
+ * "<page>_<post>") and video/Reel posts (we store the video id, so look up
+ * its post id first).
+ *
+ * Insights metrics need the token's `read_insights` permission; without it
+ * Meta returns empty data and only reactions/comments/shares are filled.
+ * Meta keeps renaming/retiring Page Insights metrics, so each metric is
+ * requested on its own and missing ones are skipped instead of failing
+ * the whole fetch. Reactions/comments/shares come from the post object,
+ * which is stable. `clicks` = link clicks when Meta reports them, else all
+ * post clicks — this is the click count used once posts link straight to
+ * Shopee (no /go/ redirect of our own).
+ */
 async function fetchFacebookMetrics(platformPostId: string): Promise<EngagementMetrics | null> {
-  if (!env.META_PAGE_ACCESS_TOKEN) return null;
-
-  const url = `${GRAPH_BASE}/${platformPostId}/insights` +
-    `?metric=post_impressions,post_clicks,post_reactions_by_type_total` +
-    `&access_token=${env.META_PAGE_ACCESS_TOKEN}`;
-
-  const json = await retry(async () => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`fb insights ${res.status}: ${await res.text()}`);
-    return res.json() as Promise<{ data?: Array<{ name: string; values: Array<{ value: unknown }> }> }>;
-  }, { attempts: 3, baseDelayMs: 500 });
-
-  const data = json.data ?? [];
-  const get = (n: string) => {
-    const m = data.find((d) => d.name === n);
-    if (!m || !m.values?.length) return null;
-    return m.values[0].value;
+  if (!env.META_PAGE_ACCESS_TOKEN || !env.META_PAGE_ID) return null;
+  const token = await resolvePageToken(env.META_PAGE_ID, env.META_PAGE_ACCESS_TOKEN);
+  const q = (path: string) => `${GRAPH_BASE}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`;
+  const getJson = async (path: string) => {
+    const res = await fetch(q(path));
+    const body = (await res.json()) as Record<string, unknown> & { error?: { message?: string } };
+    if (!res.ok || body.error) throw new Error(body.error?.message ?? `fb ${res.status}`);
+    return body;
   };
 
-  const impressions = numOrNull(get("post_impressions"));
-  const clicks = numOrNull(get("post_clicks"));
-  const reactions = get("post_reactions_by_type_total") as Record<string, number> | null;
-  const totalReactions = reactions
-    ? Object.values(reactions).reduce((s, v) => s + (typeof v === "number" ? v : 0), 0)
+  // Video/Reel uploads return a bare video id; its post is "<page>_<video>".
+  const postId = platformPostId.includes("_") ? platformPostId : `${env.META_PAGE_ID}_${platformPostId}`;
+
+  const metric = async (name: string): Promise<unknown> => {
+    try {
+      const body = (await getJson(`${postId}/insights?metric=${name}`)) as { data?: Array<{ values?: Array<{ value: unknown }> }> };
+      return body.data?.[0]?.values?.[0]?.value ?? null;
+    } catch {
+      return null; // metric retired / not available for this post type
+    }
+  };
+
+  const [obj, clicksByType, clicksAll, views, reachA, reachB] = await Promise.all([
+    retry(() => getJson(`${postId}?fields=shares,comments.summary(true).limit(0),reactions.summary(true).limit(0)`), {
+      attempts: 2,
+      baseDelayMs: 500,
+    }),
+    metric("post_clicks_by_type"),
+    metric("post_clicks"),
+    metric("post_media_view"),
+    metric("post_impressions_unique"),
+    metric("post_total_media_view_unique"),
+  ]);
+  const o = obj as {
+    shares?: { count?: number };
+    comments?: { summary?: { total_count?: number } };
+    reactions?: { summary?: { total_count?: number } };
+  };
+  const linkClicks = clicksByType && typeof clicksByType === "object"
+    ? numOrNull((clicksByType as Record<string, unknown>)["link clicks"])
     : null;
 
   return {
     ...EMPTY,
-    impressions,
-    likes: totalReactions,
-    clicks,
-    raw: json as Record<string, unknown>,
+    views: numOrNull(views),
+    impressions: numOrNull(views),
+    reach: numOrNull(reachA) ?? numOrNull(reachB),
+    likes: o.reactions?.summary?.total_count ?? null,
+    comments: o.comments?.summary?.total_count ?? null,
+    shares: o.shares?.count ?? 0,
+    clicks: linkClicks ?? numOrNull(clicksAll),
+    raw: { postId, object: obj, clicksByType, clicksAll, views, reach: reachA ?? reachB },
   };
 }
 

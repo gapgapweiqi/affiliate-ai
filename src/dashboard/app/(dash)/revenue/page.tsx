@@ -1,10 +1,16 @@
 import { BarChart } from "@/components/charts";
-import { Card, Kpi, PageHeader, Table, Td, truncate } from "@/components/ui";
-import { baht, num, NICHE_LABEL, pct } from "@/lib/format";
-import { getChannelPerformance, getTopProductsByClicks } from "@/lib/queries";
+import { Badge, Card, Kpi, PageHeader, Table, Td, statusColor, truncate } from "@/components/ui";
+import { baht, dateTime, num, NICHE_LABEL, pct } from "@/lib/format";
+import { getChannelPerformance, getConversionTotals, getRecentConversions, getTopProductsByClicks } from "@/lib/queries";
 
 export default async function RevenuePage() {
-  const [channels, top] = await Promise.all([getChannelPerformance(30), getTopProductsByClicks(30, 15)]);
+  const [channels, top, conv, sales] = await Promise.all([
+    getChannelPerformance(30),
+    getTopProductsByClicks(30, 15),
+    getConversionTotals(30),
+    getRecentConversions(20),
+  ]);
+  const shopeeApi = Boolean(process.env.SHOPEE_API_KEY && process.env.SHOPEE_API_SECRET);
   const totalClicks = channels.reduce((s, c) => s + c.clicks, 0);
   const totalRevenue = channels.reduce((s, c) => s + Number(c.revenueSatang), 0);
   const totalConv = channels.reduce((s, c) => s + c.conversions, 0);
@@ -13,8 +19,21 @@ export default async function RevenuePage() {
     <>
       <PageHeader title="รายได้" subtitle="Revenue Analytics · 30 วันล่าสุด" />
 
-      <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        ยอดขายและค่าคอมจริงจะมาจาก Shopee Open API (ตอนนี้รออนุมัติ) — หน้านี้จึงแสดงคลิกเป็นหลักจนกว่าจะเชื่อมต่อได้
+      {!shopeeApi && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          ยอดขายและค่าคอมจริงจะมาจาก Shopee Open API (ตอนนี้รออนุมัติ) — ใส่ SHOPEE_API_KEY / SHOPEE_API_SECRET แล้วระบบจะดึงรายงานทุก 6 ชม.
+        </div>
+      )}
+
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Kpi label="ออเดอร์จาก Shopee (30 วัน)" value={num(conv?.orders)} hint={`${num(conv?.items)} ชิ้น`} />
+        <Kpi label="ค่าคอม (30 วัน)" value={baht(conv?.commissionSatang)} />
+        <Kpi label="ยอดขายที่เราพาไป" value={baht(conv?.salesSatang)} />
+        <Kpi
+          label="ระบุโพสต์ได้"
+          value={conv?.items ? pct((conv.attributedItems ?? 0) / conv.items, 0) : "–"}
+          hint="ชิ้นที่ subId ชี้กลับไปหาโพสต์ของเรา"
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -61,6 +80,27 @@ export default async function RevenuePage() {
               <Td>{baht(p.currentPrice)}</Td>
               <Td className="font-semibold">{num(p.clicks)}</Td>
               <Td>{baht(p.revenueSatang)}</Td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+      <Card title="ยอดขายล่าสุดจาก Shopee" subtitle="จาก conversion report · อัปเดตทุก 6 ชม." className="mt-6">
+        <Table head={["เวลา", "สินค้า", "ชิ้น", "สถานะ", "ค่าคอม", "ช่องทาง", "โพสต์"]} empty={sales.length === 0}>
+          {sales.map((c) => (
+            <tr key={c.id}>
+              <Td className="whitespace-nowrap text-xs text-slate-500">{dateTime(c.purchasedAt)}</Td>
+              <Td>{truncate(c.itemName, 50)}</Td>
+              <Td>{c.qty ?? "–"}</Td>
+              <Td><Badge color={statusColor((c.orderStatus ?? "").toLowerCase())}>{c.orderStatus ?? "–"}</Badge></Td>
+              <Td className="whitespace-nowrap">{baht(c.commissionSatang)}</Td>
+              <Td>{c.channel ?? "–"}</Td>
+              <Td>
+                {c.postUrl ? (
+                  <a href={c.postUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">เปิดโพสต์</a>
+                ) : (
+                  "–"
+                )}
+              </Td>
             </tr>
           ))}
         </Table>

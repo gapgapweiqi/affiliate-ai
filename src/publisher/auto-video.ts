@@ -2,15 +2,16 @@
  * Daily auto video post (scheduled 22:30 BKK by default).
  *
  * Picks the best product that hasn't had a video recently, runs the voiced
- * product-video pipeline (Sonnet → ElevenLabs → WanGP on the host GPU →
- * ffmpeg) and publishes it to Facebook with its own gated caption.
+ * product-video pipeline (Sonnet → ElevenLabs → Kling on fal.ai or WanGP on
+ * the host GPU → ffmpeg) and publishes it to Facebook with its own gated caption.
  *
- * Skips quietly when WanGP isn't configured or reachable (the host PC may be
- * off). Honours DEBUG_DRY_RUN through publishToFacebook, like every post.
+ * Skips quietly when no video provider is configured, or when WanGP is the
+ * provider and the host PC is off. Honours DEBUG_DRY_RUN through
+ * publishToFacebook, like every post.
  */
 
 import { sql } from "drizzle-orm";
-import { makeVoicedProductVideo } from "../content/video-pipeline.ts";
+import { makeVoicedProductVideo, videoProvider } from "../content/video-pipeline.ts";
 import { db } from "../lib/db.ts";
 import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
@@ -57,8 +58,11 @@ async function pickProduct(): Promise<number | null> {
 }
 
 export async function runAutoVideoPost(): Promise<AutoVideoResult> {
-  if (!env.WANGP_URL) return { status: "skipped", reason: "WANGP_URL not set" };
-  if (!(await wanGPReachable())) return { status: "skipped", reason: "WanGP server not reachable (host PC off?)" };
+  const provider = videoProvider();
+  if (!provider) return { status: "skipped", reason: "no video provider (set FAL_KEY or WANGP_URL)" };
+  if (provider === "wangp" && !(await wanGPReachable())) {
+    return { status: "skipped", reason: "WanGP server not reachable (host PC off?)" };
+  }
 
   const productId = await pickProduct();
   if (!productId) return { status: "skipped", reason: "no eligible product" };

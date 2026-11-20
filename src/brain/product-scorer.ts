@@ -14,7 +14,7 @@
  *               (missing rating_count counts as 10)
  *   deal      — discount, capped at 60%              0.20
  *   velocity  — units sold in the last 7 days (rank) 0.10
- *   clicks    — our own /go/ clicks, 14 days (rank)  0.10
+ *   clicks    — /go/ clicks + FB-reported post clicks, 14 d (rank) 0.10
  *   shop      — shops.reliability_score              0.10
  *
  * Penalties (multiplied in): price < ฿20 or discount ≥ 90% (bait pricing)
@@ -48,11 +48,25 @@ export async function rescoreProducts(): Promise<{ scored: number }> {
       GROUP BY product_id
     ),
     clicks_14d AS (
-      SELECT al.product_id, COUNT(*) AS n
-      FROM clicks c
-      JOIN affiliate_links al ON al.id = c.affiliate_link_id
-      WHERE c.clicked_at > NOW() - INTERVAL '14 days'
-      GROUP BY al.product_id
+      -- Our own /go/ clicks (site mode) + the latest platform-reported click
+      -- count per post (posts that link straight to Shopee have no /go/).
+      SELECT product_id, SUM(n) AS n FROM (
+        SELECT al.product_id, COUNT(*) AS n
+        FROM clicks c
+        JOIN affiliate_links al ON al.id = c.affiliate_link_id
+        WHERE c.clicked_at > NOW() - INTERVAL '14 days' AND NOT c.is_bot
+        GROUP BY al.product_id
+        UNION ALL
+        SELECT pp.product_id, COALESCE(m.clicks, 0) AS n
+        FROM published_posts pp
+        JOIN LATERAL (
+          SELECT clicks FROM post_metrics pm
+          WHERE pm.published_post_id = pp.id ORDER BY pm.captured_at DESC LIMIT 1
+        ) m ON TRUE
+        WHERE pp.published_at > NOW() - INTERVAL '14 days' AND NOT pp.dry_run
+      ) u
+      WHERE product_id IS NOT NULL
+      GROUP BY product_id
     ),
     base AS (
       SELECT p.id,

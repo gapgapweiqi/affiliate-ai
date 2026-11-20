@@ -44,21 +44,49 @@ interface Parsed {
   hashtags?: string[];
 }
 
-const SYSTEM = `You are a senior Thai social-commerce copywriter. You create short vertical product videos for a Facebook page that sells Shopee products through affiliate links.
+/**
+ * How the clip will be made — the voiceover length and shot list must fit it.
+ *   kling: one 10 s Kling clip; the camera may drift slowly (no text paste-back).
+ *   wangp: two ~5 s WanGP clips with a locked camera (printed text is pasted back).
+ */
+export interface ShotPlan {
+  provider: "kling" | "wangp";
+}
+
+const PLAN_TEXT: Record<ShotPlan["provider"], { voice: string; shots: string }> = {
+  kling: {
+    voice: "- 80-110 Thai characters (at most 9 seconds read aloud — the clip is 10 seconds). Natural spoken Thai, warm and persuasive, like a friend who found a good deal.",
+    shots: `2) "shots" — exactly 1 English prompt for a single 10-second image-to-video clip.
+- One continuous shot: a slow, smooth camera push-in or gentle orbit, OR a locked camera — pick what suits the product. No cuts, no fast moves.
+- Motion: the product turning slowly or floating gently, a soft light sweep and glints across its surface, subtle bokeh or particles in the background. 2-3 beats that follow the voiceover.
+- The product stays the hero, centered and fully in frame; no hands, no people, no new objects.`,
+  },
+  wangp: {
+    voice: "- 110-160 Thai characters (about 9-12 seconds read aloud). Natural spoken Thai, warm and persuasive, like a friend who found a good deal.",
+    shots: `2) "shots" — exactly 2 English prompts for the image-to-video model, one per ~5 second clip, in order.
+- The camera is LOCKED OFF (static framing, no pan, no zoom, no orbit) — printed text in the photo is pasted back afterwards, so the frame must not move.
+- Motion comes from: the product gently floating / turning very slightly, soft light sweeps across its surface, glints, subtle glowing particles or bokeh in the background.
+- Make the two shots feel different (e.g. shot 1 a light sweep + glint, shot 2 a gentle float with soft glow) and match the mood of the voiceover.`,
+  },
+};
+
+function buildSystem(plan: ShotPlan): string {
+  const t = PLAN_TEXT[plan.provider];
+  return SYSTEM_TEMPLATE.replace("{{VOICE_LENGTH}}", t.voice).replace("{{SHOTS}}", t.shots);
+}
+
+const SYSTEM_TEMPLATE = `You are a senior Thai social-commerce copywriter. You create short vertical product videos for a Facebook page that sells Shopee products through affiliate links.
 The video shows ONLY the product (no people): its Shopee product photo is animated by an image-to-video model, with a Thai voiceover on top.
 
 Write three things:
 
 1) "voiceover" — Thai narration for the video.
-- 110-160 Thai characters (about 9-12 seconds read aloud). Natural spoken Thai, warm and persuasive, like a friend who found a good deal.
+{{VOICE_LENGTH}}
 - Structure: hook in the first 2 seconds → 1-2 concrete benefits from the product data → price (and the discount if any) → soft call to action (e.g. "กดลิงก์ในโพสต์ได้เลย").
 - Write numbers as words a TTS reads well ("เก้าสิบเก้าบาท", "สี่จุดหก").
 - No emoji, no hashtags, no URLs.
 
-2) "shots" — exactly 2 English prompts for the image-to-video model, one per ~5 second clip, in order.
-- The camera is LOCKED OFF (static framing, no pan, no zoom, no orbit) — printed text in the photo is pasted back afterwards, so the frame must not move.
-- Motion comes from: the product gently floating / turning very slightly, soft light sweeps across its surface, glints, subtle glowing particles or bokeh in the background.
-- Make the two shots feel different (e.g. shot 1 a light sweep + glint, shot 2 a gentle float with soft glow) and match the mood of the voiceover.
+{{SHOTS}}
 - You cannot see the photo: never describe the product's color, material or look — just call it "the product" (or its type, e.g. "the earbuds and charging case").
 - Always say the product keeps exactly the same shape, color, logo and printed text. 35-60 words each.
 
@@ -72,7 +100,10 @@ Hard rules for everything: only claim what the product data supports; no invente
 Return ONLY JSON:
 {"voiceover": "...", "shots": ["...", "..."], "caption": "...", "hashtags": ["#...", "..."]}`;
 
-export async function writeVideoContent(productId: number): Promise<VideoContent> {
+export async function writeVideoContent(
+  productId: number,
+  plan: ShotPlan = { provider: "wangp" },
+): Promise<VideoContent> {
   const [p] = await db
     .select({
       id: schema.products.id,
@@ -118,7 +149,7 @@ export async function writeVideoContent(productId: number): Promise<VideoContent
   for (let attempt = 1; attempt <= 2 && !found; attempt++) {
     const res = await complete({
       tier: "smart",
-      system: SYSTEM,
+      system: buildSystem(plan),
       prompt: `Product data (JSON):\n${JSON.stringify(facts, null, 2)}`,
       maxTokens: 6000, // 5-family models think before answering; leave room
       task: "video_content",
@@ -173,7 +204,7 @@ export async function writeVideoContent(productId: number): Promise<VideoContent
   );
   return {
     voiceover: parsed.voiceover.trim(),
-    shots: parsed.shots.slice(0, 3).map((s) => s.trim()),
+    shots: parsed.shots.slice(0, plan.provider === "kling" ? 1 : 3).map((s) => s.trim()),
     caption: gate.finalText,
     hashtags,
     variantId: gate.approved ? row!.id : null,

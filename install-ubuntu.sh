@@ -3,7 +3,7 @@
 # affiliate-ai — one-shot installer for Ubuntu 24.04 LTS
 #
 #   Installs Docker Engine + Compose, gets the code, writes a safe .env
-#   (dry-run ON, video OFF), builds and starts every container, builds the
+#   (dry-run ON; video only if you give a fal.ai key), builds and starts every container, builds the
 #   static site, and checks that it all answers.
 #
 # Usage
@@ -117,6 +117,21 @@ ask() { # ask KEY "question" [secret] — only when empty and interactive; env v
   return 0
 }
 
+site_on() { [[ "$(get_env SITE_ENABLED)" == "true" ]]; }
+
+link_status() {
+  if [[ "$(get_env LINK_MODE)" == "redirect" ]]; then echo "/go/ redirect on $(get_env SITE_DOMAIN)"
+  elif [[ -n "$(get_env SHOPEE_API_KEY)" && -n "$(get_env SHOPEE_API_SECRET)" ]]; then echo "Shopee short links (commission-tracked)"
+  elif site_on; then echo "/go/ redirect on $(get_env SITE_DOMAIN) until the Shopee API keys are added"
+  else echo "plain Shopee product URLs until the Shopee API keys are added (not commission-tracked yet)"; fi
+}
+
+video_status() {
+  if [[ -n "$(get_env FAL_KEY)" ]]; then echo "on (Kling via fal.ai, 22:30 daily)"
+  elif [[ -n "$(get_env WANGP_URL)" ]]; then echo "on (WanGP at $(get_env WANGP_URL))"
+  else echo "off"; fi
+}
+
 rand() { openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c "${1:-24}"; }
 
 # ---------- steps ----------
@@ -228,17 +243,31 @@ setup_env() {
   fi
   ask ANTHROPIC_API_KEY "Anthropic API key (captions, moderation)" secret
   ask APIFY_TOKEN "Apify token (Shopee scraping)" secret
-  ask SHOPEE_AFFILIATE_ID "Shopee affiliate ID (af_id in links)"
-  ask SITE_DOMAIN "Public domain for the site and /go/ links, e.g. shop.example.com"
+  ask SHOPEE_AFFILIATE_ID "Shopee affiliate ID"
+  ask SHOPEE_API_KEY "Shopee Open Affiliate API app ID (once approved — posts then link straight to Shopee)"
+  ask SHOPEE_API_SECRET "Shopee Open Affiliate API secret" secret
+  ask SITE_DOMAIN "Domain for the optional product website + /go/ links (Enter = no website, no domain needed)"
   [[ -n "$(get_env DOMAIN_NAME)" && "$(get_env DOMAIN_NAME)" != "example.com" ]] || set_env DOMAIN_NAME "$(get_env SITE_DOMAIN)"
+  # The website runs only with a domain; without it posts use Shopee links.
+  if [[ "$(get_env SITE_DOMAIN)" =~ ^(|example\.com)$ ]]; then
+    set_env SITE_ENABLED false
+    set_env COMPOSE_PROFILES ""
+  else
+    set_env SITE_ENABLED true
+    set_env COMPOSE_PROFILES site
+  fi
+  default_env LINK_MODE auto
   ask META_PAGE_ID "Facebook Page ID (optional)"
   ask META_PAGE_ACCESS_TOKEN "Facebook Page or admin user token (optional)" secret
+  ask FAL_KEY "fal.ai key for daily Kling videos, ~\$0.70/clip (optional — Enter = no video)" secret
+  ask ELEVENLABS_API_KEY "ElevenLabs API key for the Thai voiceover (optional)" secret
+  ask ELEVENLABS_VOICE_ID "ElevenLabs voice ID (optional)"
 
   chmod 600 "$ENV_FILE"
   chown "$TARGET_USER":"$TARGET_USER" "$ENV_FILE"
   local dash="localhost only"
   [[ "$(get_env DASHBOARD_BIND)" == "0.0.0.0" ]] && dash="all interfaces (password-protected)"
-  ok "dry-run: $(get_env DEBUG_DRY_RUN) · video: $( [[ -n "$(get_env WANGP_URL)" ]] && echo on || echo off) · dashboard: $dash"
+  ok "dry-run: $(get_env DEBUG_DRY_RUN) · video: $(video_status) · dashboard: $dash"
 }
 
 start_stack() {
@@ -250,9 +279,11 @@ start_stack() {
   docker compose up -d --remove-orphans
   ok "containers up (migrations applied)"
 
-  step "Building the static site"
-  docker compose --profile tools run --rm site-build >/dev/null
-  ok "site written to site-out/dist"
+  if site_on; then
+    step "Building the static site"
+    docker compose --profile tools run --rm site-build >/dev/null
+    ok "site written to site-out/dist"
+  fi
 }
 
 health() {
@@ -268,8 +299,10 @@ health() {
     done
     warn "$1 not answering yet ($2 → ${code:-none}) — see: docker compose logs"; fails=$((fails + 1))
   }
-  check "public site"     "http://127.0.0.1:${port}/"
-  check "redirect server" "http://127.0.0.1:3001/health"
+  if site_on; then
+    check "public site"     "http://127.0.0.1:${port}/"
+    check "redirect server" "http://127.0.0.1:3001/health"
+  fi
   check "dashboard"       "http://127.0.0.1:3100/login"
   docker compose ps --format '   {{.Service}}: {{.Status}}'
   return 0
@@ -287,20 +320,22 @@ summary() {
 
 ${G}${B}affiliate-ai is running.${N}  (${APP_DIR})
 
-  Public site        http://${ip:-SERVER_IP}:${port}/   (put HTTPS in front: Cloudflare Tunnel, Caddy or nginx)
+  Public site        $(site_on && echo "http://${ip:-SERVER_IP}:${port}/   (put HTTPS in front: Cloudflare Tunnel, Caddy or nginx)" || echo "off — no domain needed")
   Dashboard          ${dash_how}
                      password: ${pw}   (DASHBOARD_PASSWORD in .env)
   Adminer / Studio   same way: ssh -L 8081:127.0.0.1:8081 -L 4983:127.0.0.1:4983 ...
 
   ${Y}DEBUG_DRY_RUN=$(get_env DEBUG_DRY_RUN)${N} — nothing is posted until you set it to false in .env and run:
       cd ${APP_DIR} && sudo docker compose up -d --force-recreate
-  Video posts are off (WANGP_URL empty) — the 22:30 job skips itself.
+  Video posts: $(video_status)$( [[ -z "$(get_env FAL_KEY)$(get_env WANGP_URL)" ]] && echo " — add FAL_KEY to .env to turn them on")
 
   Logs      cd ${APP_DIR} && sudo docker compose logs -f scheduler
   Update    sudo bash ${APP_DIR}/install-ubuntu.sh --update
-  Domain    /go/ links in posts use SITE_DOMAIN/DOMAIN_NAME = '$(get_env SITE_DOMAIN)'
+  Links     $(link_status)
 EOF
-  [[ "$(get_env SITE_DOMAIN)" =~ ^(|example\.com)$ ]] && warn "SITE_DOMAIN is not set — links in posts won't work until it points at this server"
+  if [[ -z "$(get_env SHOPEE_API_KEY)" ]] && ! site_on; then
+    warn "Until the Shopee Open API keys are in .env, post links are plain product URLs (no commission tracking)."
+  fi
   return 0
 }
 

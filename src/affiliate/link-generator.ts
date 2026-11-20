@@ -18,7 +18,22 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "../lib/db.ts";
 import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
-import { tryGenerateShortLink } from "./shopee-api.ts";
+import { shopeeApiConfigured, tryGenerateShortLink } from "./shopee-api.ts";
+
+export type LinkMode = "shopee" | "redirect" | "direct";
+
+/** Resolve LINK_MODE=auto against what's configured. */
+export function linkMode(): LinkMode {
+  if (env.LINK_MODE === "shopee") return "shopee";
+  if (env.LINK_MODE === "redirect") return "redirect";
+  if (shopeeApiConfigured()) return "shopee";
+  return env.SITE_ENABLED ? "redirect" : "direct";
+}
+
+/** Shopee subIds must be plain alphanumerics; utmContent joins them with "-". */
+function subId(v: string | null | undefined): string {
+  return (v ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 50);
+}
 
 const log = child("affiliate.link-gen");
 
@@ -163,26 +178,32 @@ export async function createAffiliateLink(
 
   if (!result) throw new Error("Failed to insert affiliate link after retries");
 
-  const shortUrl = `https://${env.DOMAIN_NAME}/go/${shortId}`;
-  log.info(
-    { productId: product.id, channel: opts.channel, shortId, shortUrl },
-    "affiliate link created",
-  );
+  // subIds come back in Shopee's conversion report (utmContent), so the
+  // report job can map a sale to this row via the shortId.
+  const subIds = [opts.channel, shortId, subId(opts.campaign), subId(opts.variant)].filter(Boolean);
+  const mode = linkMode();
+  let shortUrl = `https://${env.DOMAIN_NAME}/go/${shortId}`;
 
-  // Best-effort: ask Shopee for a tracked shope.ee/xxx short link so
-  // the redirect lands on a URL Shopee actually attributes commission
-  // to. No-op when SHOPEE_API_KEY isn't configured. We do this AFTER
-  // the affiliate_links row is committed so a Shopee API failure
-  // doesn't block click tracking — fall back to direct fullUrl in
-  // redirect-server when shopeeShortUrl is null.
-  if (product.platform === "shopee") {
-    void tryAttachShopeeShortLink({
-      affiliateLinkId: result.id,
-      originUrl: fullUrl,
-      subIds: [opts.channel, shortId, opts.campaign ?? "", opts.variant ?? ""].filter(Boolean),
-    });
+  if (mode === "shopee" && product.platform === "shopee") {
+    // Posts carry Shopee's own short link: commission-tracked, no domain or
+    // redirect server needed. Generated before returning so the caption gets it.
+    const shopeeLink = await tryGenerateShortLink({ originUrl: fullUrl, subIds });
+    if (shopeeLink) {
+      shortUrl = shopeeLink;
+      await db.update(schema.affiliateLinks).set({ shopeeShortUrl: shopeeLink }).where(eq(schema.affiliateLinks.id, result.id));
+    } else {
+      shortUrl = env.SITE_ENABLED ? shortUrl : fullUrl;
+      log.warn({ productId: product.id, shortId }, "Shopee short link failed — using fallback link");
+    }
+  } else if (mode === "direct") {
+    shortUrl = fullUrl;
+  } else if (product.platform === "shopee") {
+    // redirect mode: keep /go/ for our click tracking, and attach a Shopee
+    // short link in the background so the redirect lands on a tracked URL.
+    void tryAttachShopeeShortLink({ affiliateLinkId: result.id, originUrl: fullUrl, subIds });
   }
 
+  log.info({ productId: product.id, channel: opts.channel, shortId, shortUrl, mode }, "affiliate link created");
   return { shortId, shortUrl, fullUrl, affiliateLinkId: result.id };
 }
 

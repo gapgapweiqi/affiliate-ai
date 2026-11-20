@@ -17,6 +17,16 @@ const CHANNELS: { key: Channel; label: string; capEnv: string; capDefault: numbe
   { key: "tiktok", label: "TikTok", capEnv: "DAILY_POSTS_TIKTOK", capDefault: 3 },
 ];
 
+/** Mirrors videoProvider() in src/content/video-pipeline.ts. */
+function videoProviderLabel(): string {
+  const want = process.env.VIDEO_PROVIDER || "auto";
+  const fal = Boolean(process.env.FAL_KEY);
+  const wangp = Boolean(process.env.WANGP_URL);
+  if ((want === "kling" || want === "auto") && fal) return "Kling 2.5 Turbo Pro (fal.ai) · ≈$0.70/คลิป";
+  if ((want === "wangp" || want === "auto") && wangp) return "WanGP บนเครื่อง (ต้องเปิดเครื่อง + server)";
+  return "ยังไม่ตั้งค่า (FAL_KEY หรือ WANGP_URL) — ข้ามงานวิดีโอ";
+}
+
 const flag = (k: string) => process.env[k] === "true" || process.env[k] === "1";
 
 /** Would a post on this channel go out for real? Mirrors each publisher's dry-run gate. */
@@ -191,7 +201,7 @@ export default async function QueuePage() {
           </div>
           <div className="mt-2 text-2xl font-semibold">{nextVideo ? bkkLabel(nextVideo) : "–"}</div>
           <div className="mt-1 text-xs text-slate-500">
-            วันละ 1 คลิป · ต้องเปิด WanGP บนเครื่อง{process.env.WANGP_URL ? "" : " (ยังไม่ตั้ง WANGP_URL)"}
+            วันละ 1 คลิป · {videoProviderLabel()}
           </div>
         </Card>
       </div>

@@ -32,6 +32,14 @@ const envSchema = z.object({
   SHOPEE_AFFILIATE_ID: optStr,
   SHOPEE_API_KEY: optStr,
   SHOPEE_API_SECRET: optStr,
+  /**
+   * Which link goes into posts:
+   *   shopee   — Shopee short link (Open Affiliate API), commission-tracked, no domain needed
+   *   redirect — our own https://DOMAIN_NAME/go/<id> (needs the site + a public domain)
+   *   auto     — shopee when SHOPEE_API_KEY/SECRET are set, else redirect when
+   *              SITE_ENABLED, else the plain product URL
+   */
+  LINK_MODE: z.enum(["auto", "shopee", "redirect"]).default("auto"),
   SHOPEE_TRACKING_ID: optStr,
   TIKTOK_SHOP_AFFILIATE_ID: optStr,
   TIKTOK_SHOP_API_KEY: optStr,
@@ -72,6 +80,11 @@ const envSchema = z.object({
   // Public site config (used by site builder + deployer).
   // Override these in your .env to point at your own domain.
   SITE_DOMAIN: z.string().default("example.com").transform(normalizeHost),
+  /** Product website + /go/ redirect. false = no site rebuilds (also drop "site" from COMPOSE_PROFILES). */
+  SITE_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v !== "false" && v !== "0"),
   SITE_NAME: z.string().default("Affiliate AI"),
   SITE_OUT_DIR: z.string().default("./dist"),
   /** Set true to auto-deploy to Cloudflare Pages after every site rebuild. */
@@ -95,6 +108,11 @@ const envSchema = z.object({
 
   // Local video generation (tools/wangp-server on the host GPU)
   WANGP_URL: optStr,
+  // Cloud video (Kling on fal.ai) — no GPU needed
+  FAL_KEY: optStr,
+  FAL_KLING_MODEL: z.string().default("fal-ai/kling-video/v2.5-turbo/pro/image-to-video"),
+  /** auto = Kling when FAL_KEY is set, else WanGP when WANGP_URL is set. */
+  VIDEO_PROVIDER: z.enum(["auto", "kling", "wangp"]).default("auto"),
   WANGP_PRESENTER_FILE: optStr,  // image in the server's output dir, e.g. presenter-default.jpg
 
   // Social
@@ -123,6 +141,7 @@ const envSchema = z.object({
   CRON_SCRAPE_PRODUCTS: z.string().default("0 8,13,19,22 * * *"),
   CRON_VIDEO_POST: z.string().default("30 22 * * *"),
   CRON_DAILY_CAPTIONS: z.string().default("30 7 * * *"),
+  CRON_SHOPEE_REPORT: z.string().default("20 */6 * * *"),
   DAILY_CAPTION_PRODUCTS: z.coerce.number().int().min(0).default(5),
 
   // Budget caps

@@ -47,6 +47,7 @@ async function main() {
   let variantId: number | undefined;
   if (mode === "voiced") {
     const v = await makeVoicedProductVideo(productId);
+    console.log(`provider: ${v.provider}`);
     console.log(`voiceover (${v.voiceSec.toFixed(1)}s${v.voiceDryRun ? ", SILENT placeholder" : ""}): ${v.content.voiceover}`);
     v.content.shots.forEach((s, i) => console.log(`shot ${i + 1}: ${s}`));
     console.log(`caption (variant ${v.content.variantId ?? "REJECTED"}):\n${v.content.caption}`);

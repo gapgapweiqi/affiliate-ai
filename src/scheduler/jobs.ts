@@ -17,6 +17,7 @@ import { runLearningOptimizer } from "../brain/learning.ts";
 import { runPromoHunter } from "../brain/promo-hunter.ts";
 import { runPromoTrigger } from "../brain/promo-trigger.ts";
 import { runDailyCaptions } from "../brain/daily-captions.ts";
+import { runShopeeReport } from "../affiliate/shopee-report.ts";
 import { rescoreProducts } from "../brain/product-scorer.ts";
 import { runEngagementTracker } from "../engagement/tracker.ts";
 import { runSourceHealthCheck } from "../monitoring/source-health.ts";
@@ -93,6 +94,15 @@ async function rescoreSafely(): Promise<void> {
 export async function jobDailyCaptions(): Promise<void> {
   const r = await runDailyCaptions({ count: env.DAILY_CAPTION_PRODUCTS });
   log.info(r, "dailyCaptions done");
+}
+
+/**
+ * Shopee sales + commission (Open Affiliate API conversion report).
+ * No-op until SHOPEE_API_KEY/SECRET are set.
+ */
+export async function jobShopeeReport(): Promise<void> {
+  const r = await runShopeeReport();
+  log.info(r, "shopeeReport done");
 }
 
 /**

@@ -326,6 +326,10 @@ let queuedBuildResolvers: Array<(r: BuildResult) => void> = [];
 let queuedBuildRejectors: Array<(err: unknown) => void> = [];
 
 export function scheduleSiteRebuild(opts: BuildOptions = {}): Promise<BuildResult> {
+  if (!env.SITE_ENABLED) {
+    // Product website switched off (posts link straight to Shopee) — nothing to rebuild.
+    return Promise.resolve({ outDir: opts.outDir ?? DEFAULT_OUT, pagesWritten: 0, productsRendered: 0, durationMs: 0 });
+  }
   return new Promise<BuildResult>((resolve, reject) => {
     queuedBuildResolvers.push(resolve);
     queuedBuildRejectors.push(reject);

@@ -3,6 +3,10 @@
 # Studio, the redirect server and the dashboard bind to 127.0.0.1 — Docker
 # publishes ports past ufw, so on a server they would otherwise be open to
 # the internet. Override in .env: INTERNAL_BIND, DASHBOARD_BIND, WEB_BIND, WEB_PORT.
+#
+# The product website (web + redirect) is optional: it only starts when
+# COMPOSE_PROFILES includes "site" (set in .env). Posts that link straight
+# to Shopee (LINK_MODE=shopee) need neither a site nor a domain.
 services:
   db:
     image: postgres:16-alpine
@@ -44,6 +48,7 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+    profiles: ["site"]
 
   scheduler:
     build: .
@@ -83,6 +88,7 @@ services:
     depends_on:
       - redirect
     restart: unless-stopped
+    profiles: ["site"]
 
   adminer:
     image: adminer

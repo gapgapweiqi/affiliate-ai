@@ -659,3 +659,43 @@ export const promoEvents = pgTable(
     typeIdx: index("promo_events_type_idx").on(t.eventType, t.detectedAt),
   }),
 );
+
+/* ===================================================================
+ * AFFILIATE CONVERSIONS
+ * Sold items from Shopee's Open Affiliate API conversion report, one row
+ * per (conversion, order, item). utmContent carries the subIds we put on
+ * the short link ("<channel>-<shortId>-<campaign>-<variant>"), which maps
+ * the sale back to affiliate_links → product / caption variant / post.
+ * =================================================================== */
+
+export const affiliateConversions = pgTable(
+  "affiliate_conversions",
+  {
+    id: serial("id").primaryKey(),
+    platform: varchar("platform", { length: 16 }).notNull().default("shopee"),
+    conversionId: varchar("conversion_id", { length: 64 }).notNull(),
+    orderId: varchar("order_id", { length: 64 }).notNull(),
+    itemId: varchar("item_id", { length: 64 }).notNull(),
+    itemName: text("item_name"),
+    qty: integer("qty"),
+    orderStatus: varchar("order_status", { length: 32 }),
+    /** Commission for this item, satang. */
+    commissionSatang: bigint("commission_satang", { mode: "number" }).notNull().default(0),
+    /** Item revenue (price × qty), satang. */
+    amountSatang: bigint("amount_satang", { mode: "number" }),
+    utmContent: varchar("utm_content", { length: 255 }),
+    shortId: varchar("short_id", { length: 16 }),
+    affiliateLinkId: integer("affiliate_link_id").references(() => affiliateLinks.id, { onDelete: "set null" }),
+    productId: integer("product_id").references(() => products.id, { onDelete: "set null" }),
+    contentVariantId: integer("content_variant_id").references(() => contentVariants.id, { onDelete: "set null" }),
+    purchasedAt: timestamp("purchased_at", { withTimezone: true }),
+    clickedAt: timestamp("clicked_at", { withTimezone: true }),
+    raw: jsonb("raw"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqItem: uniqueIndex("affiliate_conversions_item_idx").on(t.platform, t.conversionId, t.orderId, t.itemId),
+    purchasedIdx: index("affiliate_conversions_purchased_idx").on(t.purchasedAt),
+    productIdx: index("affiliate_conversions_product_idx").on(t.productId),
+  }),
+);

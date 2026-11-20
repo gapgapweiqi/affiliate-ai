@@ -19,7 +19,8 @@ export default async function SnapshotPage() {
       <PageHeader title="ภาพรวมวันนี้" subtitle={`ดึงสินค้าล่าสุด ${ago(last?.lastScrapedAt)} · เวลาไทย`} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Kpi label="คลิกวันนี้" value={num(k.clicksToday)} delta={{ now: k.clicksToday, prev: k.clicksYesterday }} />
+        <Kpi label="คลิก /go/ วันนี้" value={num(k.clicksToday)} delta={{ now: k.clicksToday, prev: k.clicksYesterday }} hint="เฉพาะลิงก์ผ่านเว็บของเรา" />
+        <Kpi label="คลิกจาก Facebook (7 วัน)" value={num(k.fbClicks7d)} hint="Facebook Insights · ใช้ได้แม้ลิงก์ไป Shopee ตรง" />
         <Kpi label="สินค้าใหม่วันนี้" value={num(k.newProductsToday)} delta={{ now: k.newProductsToday, prev: k.newProductsYesterday }} />
         <Kpi label="โพสต์จริงวันนี้" value={num(k.postsToday)} delta={{ now: k.postsToday, prev: k.postsYesterday }} />
         <Kpi
@@ -28,7 +29,11 @@ export default async function SnapshotPage() {
           hint={`Claude ${usd(k.llmMicrosToday)} · Apify ${usd(k.scrapeMicrosToday)}`}
         />
         <Kpi label="สินค้าที่ใช้งาน" value={num(k.activeProducts)} />
-        <Kpi label="รายได้ 30 วัน" value={baht(k.revenueSatang30d)} hint="รอ Shopee Open API" />
+        <Kpi
+          label="ค่าคอม 30 วัน"
+          value={baht(k.revenueSatang30d)}
+          hint={process.env.SHOPEE_API_KEY ? "จากรายงานยอดขาย Shopee" : "รอ Shopee Open API"}
+        />
         <Kpi label="แจ้งเตือนค้าง" value={num(k.openAlerts)} />
       </div>
 

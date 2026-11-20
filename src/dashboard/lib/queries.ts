@@ -19,6 +19,7 @@ export interface SnapshotKpis {
   activeProducts: number;
   openAlerts: number;
   revenueSatang30d: number;
+  fbClicks7d: number;
 }
 
 export function getSnapshotKpis() {
@@ -34,7 +35,12 @@ export function getSnapshotKpis() {
       (SELECT coalesce(sum(cost_usd_micros), 0) FROM scraper_runs WHERE (started_at AT TIME ZONE 'Asia/Bangkok')::date = ${BKK_DAY})::bigint AS "scrapeMicrosToday",
       (SELECT count(*) FROM products WHERE is_active AND NOT flag_blacklisted)::int AS "activeProducts",
       (SELECT count(*) FROM alerts WHERE resolved_at IS NULL)::int AS "openAlerts",
-      (SELECT coalesce(sum(revenue_satang), 0) FROM insights WHERE snapshot_date >= to_char(${BKK_DAY} - 30, 'YYYY-MM-DD') AND scope = 'channel')::bigint AS "revenueSatang30d"
+      (SELECT coalesce(sum(commission_satang), 0) FROM affiliate_conversions
+        WHERE purchased_at > now() - interval '30 days' AND coalesce(order_status, '') !~* '(cancel|invalid|fail)')::bigint AS "revenueSatang30d",
+      -- latest Facebook-reported clicks of each live post from the last 7 days
+      (SELECT coalesce(sum(m.clicks), 0) FROM published_posts pp
+        JOIN LATERAL (SELECT clicks FROM post_metrics pm WHERE pm.published_post_id = pp.id ORDER BY captured_at DESC LIMIT 1) m ON TRUE
+        WHERE NOT pp.dry_run AND pp.published_at > now() - interval '7 days')::int AS "fbClicks7d"
   `);
 }
 
@@ -554,6 +560,56 @@ export function getCaptionCandidates(limit = 5) {
                       WHERE pp.product_id = p.id AND pp.channel = 'facebook' AND pp.status = 'published'
                         AND pp.published_at > now() - interval '24 hours')
     ORDER BY p.final_score DESC, p.first_seen_at DESC
+    LIMIT ${limit}
+  `);
+}
+
+/* ───────────────────────── Shopee conversions ───────────────────────── */
+
+export interface ConversionTotals {
+  orders: number;
+  items: number;
+  commissionSatang: number;
+  salesSatang: number;
+  attributedItems: number;
+}
+
+/** Sales synced from Shopee's conversion report (cancelled/invalid orders excluded). */
+export function getConversionTotals(days = 30) {
+  return one<ConversionTotals>(sql`
+    SELECT count(DISTINCT order_id)::int AS orders, count(*)::int AS items,
+      coalesce(sum(commission_satang), 0)::bigint AS "commissionSatang",
+      coalesce(sum(amount_satang), 0)::bigint AS "salesSatang",
+      count(*) FILTER (WHERE affiliate_link_id IS NOT NULL)::int AS "attributedItems"
+    FROM affiliate_conversions
+    WHERE purchased_at > now() - make_interval(days => ${days})
+      AND coalesce(order_status, '') !~* '(cancel|invalid|fail)'
+  `);
+}
+
+export interface ConversionRow {
+  id: number;
+  itemName: string | null;
+  qty: number | null;
+  orderStatus: string | null;
+  commissionSatang: number;
+  amountSatang: number | null;
+  purchasedAt: string | null;
+  channel: string | null;
+  postUrl: string | null;
+}
+
+export function getRecentConversions(limit = 20) {
+  return rows<ConversionRow>(sql`
+    SELECT c.id, c.item_name AS "itemName", c.qty, c.order_status AS "orderStatus",
+      c.commission_satang AS "commissionSatang", c.amount_satang AS "amountSatang",
+      c.purchased_at AS "purchasedAt", l.channel::text AS channel,
+      (SELECT pp.platform_post_url FROM published_posts pp
+        WHERE pp.content_variant_id = c.content_variant_id AND NOT pp.dry_run
+        ORDER BY pp.published_at DESC LIMIT 1) AS "postUrl"
+    FROM affiliate_conversions c
+    LEFT JOIN affiliate_links l ON l.id = c.affiliate_link_id
+    ORDER BY c.purchased_at DESC NULLS LAST
     LIMIT ${limit}
   `);
 }

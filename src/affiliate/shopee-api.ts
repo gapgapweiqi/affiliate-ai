@@ -42,6 +42,10 @@ export interface ShopeeApiCreds {
   appSecret: string;
 }
 
+export function shopeeApiConfigured(): boolean {
+  return Boolean(env.SHOPEE_API_KEY && env.SHOPEE_API_SECRET);
+}
+
 function getCreds(): ShopeeApiCreds | null {
   if (!env.SHOPEE_API_KEY || !env.SHOPEE_API_SECRET) return null;
   return { appId: env.SHOPEE_API_KEY, appSecret: env.SHOPEE_API_SECRET };
@@ -67,6 +71,46 @@ interface GenerateShortLinkResponse {
   generateShortLink: {
     shortLink: string | null;
   } | null;
+}
+
+/**
+ * Signed POST to the Open Affiliate GraphQL endpoint. Throws ShopeeApiError
+ * on HTTP or GraphQL errors; auth/signature errors are not retried.
+ */
+export async function shopeeGraphQL<T>(query: string, creds: ShopeeApiCreds | null = getCreds()): Promise<T> {
+  if (!creds) throw new ShopeeApiError(0, "SHOPEE_API_KEY/SECRET not set");
+  const body = JSON.stringify({ query });
+  const authHeader = buildAuthHeader(body, creds);
+
+  const json = await retry(async () => {
+    const res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: authHeader },
+      body,
+    });
+    if (!res.ok) {
+      throw new ShopeeApiError(res.status, `HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+    }
+    return (await res.json()) as GraphQLResponse<T>;
+  }, {
+    attempts: 3,
+    baseDelayMs: 1000,
+    shouldRetry: (err) => {
+      // Don't retry on signature/auth errors — they won't fix themselves
+      if (err instanceof ShopeeApiError) {
+        const msg = err.message.toLowerCase();
+        if (msg.includes("signature") || msg.includes("invalid credential")) return false;
+      }
+      return true;
+    },
+  });
+
+  if (json.errors?.length) {
+    const firstErr = json.errors[0]!;
+    throw new ShopeeApiError(firstErr.extensions?.code ?? 0, firstErr.message, json.errors);
+  }
+  if (!json.data) throw new ShopeeApiError(0, "API returned no data", json);
+  return json.data;
 }
 
 /**
@@ -105,45 +149,11 @@ export async function generateShortLink(opts: {
   const subIds = (opts.subIds ?? []).slice(0, 5);
 
   const query = `mutation { generateShortLink(input: { originUrl: ${JSON.stringify(origin)}, subIds: ${JSON.stringify(subIds)} }) { shortLink } }`;
-  const body = JSON.stringify({ query });
+  const data = await shopeeGraphQL<GenerateShortLinkResponse>(query, creds);
 
-  const authHeader = buildAuthHeader(body, creds);
-
-  const json = await retry(async () => {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": authHeader,
-      },
-      body,
-    });
-    if (!res.ok) {
-      throw new ShopeeApiError(res.status, `HTTP ${res.status}: ${await res.text().catch(() => "")}`);
-    }
-    return (await res.json()) as GraphQLResponse<GenerateShortLinkResponse>;
-  }, {
-    attempts: 3,
-    baseDelayMs: 1000,
-    shouldRetry: (err) => {
-      // Don't retry on signature/auth errors — they won't fix themselves
-      if (err instanceof ShopeeApiError) {
-        const msg = err.message.toLowerCase();
-        if (msg.includes("signature") || msg.includes("invalid credential")) return false;
-      }
-      return true;
-    },
-  });
-
-  if (json.errors?.length) {
-    const firstErr = json.errors[0];
-    const code = firstErr.extensions?.code ?? 0;
-    throw new ShopeeApiError(code, firstErr.message, json.errors);
-  }
-
-  const shortLink = json.data?.generateShortLink?.shortLink;
+  const shortLink = data.generateShortLink?.shortLink;
   if (!shortLink) {
-    throw new ShopeeApiError(0, "API returned no shortLink", json);
+    throw new ShopeeApiError(0, "API returned no shortLink", data);
   }
 
   log.debug({ origin, shortLink, subIds }, "shp.ee generated");

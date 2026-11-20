@@ -4,8 +4,10 @@
  *   product ─► Sonnet: Thai voiceover + 2 shot prompts + FB caption
  *              (caption gated + saved as a content_variant with its own link)
  *           ─► ElevenLabs voice (MP3)
- *           ─► WanGP: one product clip per shot (Shopee photo animated,
- *              locked camera, printed text protected server-side)
+ *           ─► clip(s) from the Shopee photo, by VIDEO_PROVIDER:
+ *                kling — one 10 s Kling 2.5 Turbo Pro clip on fal.ai (cloud, no GPU)
+ *                wangp — one ~5 s WanGP clip per shot on the host GPU
+ *                        (locked camera, printed text protected server-side)
  *           ─► ffmpeg: crossfade the clips, fit them to the voice length,
  *              lay them on a 1080x1920 canvas (blurred fill), mux the voice
  *
@@ -16,7 +18,11 @@
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
+import { db, schema } from "../lib/db.ts";
+import { env } from "../lib/env.ts";
 import { child } from "../lib/logger.ts";
+import { generateKlingClip } from "./fal-kling.ts";
 import { type VideoContent, writeVideoContent } from "./video-script.ts";
 import { generateVoice } from "./voice-generator.ts";
 import { generateProductVideo } from "./wangp-client.ts";
@@ -26,7 +32,20 @@ const OUTPUT_DIR = "/tmp/affiliate-ai/video";
 const MAX_CLIP_SEC = 5;
 const XFADE_SEC = 0.5;
 
+export type VideoProvider = "kling" | "wangp";
+
+/** Which clip generator to use, or null when none is configured (the video job then skips). */
+export function videoProvider(): VideoProvider | null {
+  const want = env.VIDEO_PROVIDER;
+  if (want === "kling") return env.FAL_KEY ? "kling" : null;
+  if (want === "wangp") return env.WANGP_URL ? "wangp" : null;
+  if (env.FAL_KEY) return "kling";
+  if (env.WANGP_URL) return "wangp";
+  return null;
+}
+
 export interface VoicedVideoResult {
+  provider: VideoProvider;
   path: string;          // final 1080x1920 MP4 with audio
   content: VideoContent; // voiceover, shots, caption, variantId
   voicePath: string;
@@ -115,7 +134,9 @@ async function finalize(video: string, voice: string, voiceSec: number, out: str
 }
 
 export async function makeVoicedProductVideo(productId: number): Promise<VoicedVideoResult> {
-  const content = await writeVideoContent(productId);
+  const provider = videoProvider();
+  if (!provider) throw new Error("no video provider configured (set FAL_KEY or WANGP_URL)");
+  const content = await writeVideoContent(productId, { provider });
   log.info({ productId, voiceover: content.voiceover, variantId: content.variantId }, "content ready");
 
   const voice = await generateVoice({
@@ -129,13 +150,27 @@ export async function makeVoicedProductVideo(productId: number): Promise<VoicedV
   const voiceSec = await mediaSeconds(voice.filePath);
   if (voice.dryRun) log.warn({ productId }, "ElevenLabs not configured — using a silent placeholder voice");
 
-  // Split the voice length across the shots (each clip ≤5 s on a 3060).
-  const perClip = Math.min(MAX_CLIP_SEC, Math.max(3, Math.ceil((voiceSec + 0.6) / content.shots.length + XFADE_SEC)));
   const clipPaths: string[] = [];
-  for (const [i, prompt] of content.shots.entries()) {
-    log.info({ productId, shot: i + 1, of: content.shots.length, seconds: perClip }, "generating shot");
-    const clip = await generateProductVideo({ productId, style: "product", prompt, seconds: perClip });
+  if (provider === "kling") {
+    const [p] = await db
+      .select({ image: schema.products.primaryImage })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    if (!p?.image) throw new Error(`product ${productId} has no image`);
+    // One continuous 10 s shot; the script is written to fit inside it.
+    const seconds = voiceSec + 0.6 <= 5 ? 5 : 10;
+    log.info({ productId, provider, seconds }, "generating Kling clip");
+    const clip = await generateKlingClip({ productId, imageUrl: p.image, prompt: content.shots[0]!, seconds });
     clipPaths.push(clip.path);
+  } else {
+    // Split the voice length across the shots (each clip ≤5 s on a 3060).
+    const perClip = Math.min(MAX_CLIP_SEC, Math.max(3, Math.ceil((voiceSec + 0.6) / content.shots.length + XFADE_SEC)));
+    for (const [i, prompt] of content.shots.entries()) {
+      log.info({ productId, provider, shot: i + 1, of: content.shots.length, seconds: perClip }, "generating shot");
+      const clip = await generateProductVideo({ productId, style: "product", prompt, seconds: perClip });
+      clipPaths.push(clip.path);
+    }
   }
 
   await mkdir(OUTPUT_DIR, { recursive: true });
@@ -146,5 +181,5 @@ export async function makeVoicedProductVideo(productId: number): Promise<VoicedV
   await finalize(joined, voice.filePath, voiceSec, out);
   log.info({ productId, out, voiceSec }, "voiced product video ready");
 
-  return { path: out, content, voicePath: voice.filePath, voiceSec, voiceDryRun: voice.dryRun, clipPaths };
+  return { provider, path: out, content, voicePath: voice.filePath, voiceSec, voiceDryRun: voice.dryRun, clipPaths };
 }
