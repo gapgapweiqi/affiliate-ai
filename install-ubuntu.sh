@@ -19,6 +19,8 @@
 #   --branch NAME        git branch to check out (default video-pipeline)
 #   --expose-dashboard   publish the dashboard on all interfaces (default: localhost only)
 #   --no-swap            don't create a swap file on low-memory machines
+#   --with-claude        also install Claude Code (+ Bun, tmux) for the login user,
+#                        so Claude can work on this server remotely (4 GB RAM advised)
 #   -h, --help
 #
 # Keys can be passed non-interactively, e.g.
@@ -35,6 +37,7 @@ MODE=install
 ASSUME_YES=0
 EXPOSE_DASHBOARD=0
 MAKE_SWAP=1
+WITH_CLAUDE=0
 
 # ---------- output helpers ----------
 if [[ -t 1 ]]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; C=$'\e[36m'; N=$'\e[0m'; else B='' G='' Y='' R='' C='' N=''; fi
@@ -55,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --branch) BRANCH="$2"; shift ;;
     --expose-dashboard) EXPOSE_DASHBOARD=1 ;;
     --no-swap) MAKE_SWAP=0 ;;
+    --with-claude) WITH_CLAUDE=1 ;;
     -h|--help) usage ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
@@ -166,6 +170,73 @@ install_docker() {
     usermod -aG docker "$TARGET_USER"
     ok "added $TARGET_USER to the docker group (log out and back in to use docker without sudo)"
   fi
+}
+
+# Claude Code (native installer, per user in ~/.local/bin) + Bun for
+# typechecking on the host + tmux so a session survives an SSH drop.
+# Installed for the sudo user, who is already in the docker group.
+install_claude() {
+  step "Claude Code (for remote work on this server)"
+  local home
+  home=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+  [[ -n "$home" ]] || die "can't find the home directory of $TARGET_USER"
+  if [[ "$TARGET_USER" == "root" ]]; then
+    warn "installing for root — better: create a normal user and run this script with sudo from it"
+  fi
+  local mem_mb
+  mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+  (( mem_mb >= 3500 )) || warn "only ${mem_mb} MB RAM — Claude Code plus builds next to the running stack wants 4 GB"
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y -qq tmux unzip >/dev/null
+  ok "tmux, unzip"
+
+  as_user() { sudo -u "$TARGET_USER" -H bash -lc "$1"; }
+  retry3() { local i; for i in 1 2 3; do "$@" && return 0; warn "download failed, retrying ($i/3)"; sleep 5; done; return 1; }
+  if as_user 'command -v claude >/dev/null || [ -x ~/.local/bin/claude ]'; then
+    ok "Claude Code already installed — updating"
+    as_user '~/.local/bin/claude update >/dev/null 2>&1 || claude update >/dev/null 2>&1 || true'
+  else
+    retry3 as_user 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash' >/dev/null || true   # checked below
+  fi
+  if ! as_user 'command -v bun >/dev/null || [ -x ~/.bun/bin/bun ]'; then
+    retry3 as_user 'set -o pipefail; curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1' || true   # checked below
+  fi
+
+  # Make sure both are on PATH in new shells.
+  local rc="$home/.bashrc" line
+  for line in 'export PATH="$HOME/.local/bin:$PATH"' 'export PATH="$HOME/.bun/bin:$PATH"'; do
+    grep -qxF "$line" "$rc" 2>/dev/null || echo "$line" >> "$rc"
+  done
+  chown "$TARGET_USER":"$TARGET_USER" "$rc"
+
+  local v
+  v=$(as_user '~/.local/bin/claude --version 2>/dev/null' || true)
+  [[ -n "$v" ]] || die "Claude Code install failed (see https://docs.claude.com/en/docs/claude-code/setup)"
+  ok "claude ${v}"
+  v=$(as_user '~/.bun/bin/bun --version 2>/dev/null' || true)
+  [[ -n "$v" ]] && ok "bun ${v}" || warn "Bun install failed — typechecks on the host won't work (containers are fine)"
+
+  # Dev dependencies so typechecks can run on the host.
+  if [[ -f "$APP_DIR/package.json" ]]; then
+    as_user "cd '$APP_DIR' && ~/.bun/bin/bun install --frozen-lockfile >/dev/null 2>&1 || ~/.bun/bin/bun install >/dev/null 2>&1" \
+      && ok "node_modules installed in $APP_DIR" || warn "bun install failed — run it later in $APP_DIR"
+  fi
+}
+
+claude_summary() {
+  [[ $WITH_CLAUDE -eq 1 ]] || return 0
+  local ip
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  cat <<EOF
+
+  ${B}Claude Code${N}
+      ssh ${TARGET_USER}@${ip:-SERVER_IP}
+      tmux new -A -s claude          # session keeps running if SSH drops
+      cd ${APP_DIR} && claude        # first run: log in with your Claude account (opens a URL)
+  Then use Remote Control from inside the session to continue from the Claude app.
+  Claude can read .env and restart containers here — keep its permission prompts on.
+EOF
 }
 
 ensure_swap() {
@@ -350,8 +421,10 @@ case "$MODE" in
     get_code
     setup_env
     start_stack
+    [[ $WITH_CLAUDE -eq 1 ]] && install_claude
     health
     summary
+    claude_summary
     ;;
   install)
     install_packages
@@ -360,7 +433,9 @@ case "$MODE" in
     get_code
     setup_env
     start_stack
+    [[ $WITH_CLAUDE -eq 1 ]] && install_claude
     health
     summary
+    claude_summary
     ;;
 esac

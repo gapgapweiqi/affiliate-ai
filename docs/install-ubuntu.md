@@ -83,6 +83,36 @@ sudo bash /opt/affiliate-ai/install-ubuntu.sh --update
 | `--branch NAME` | branch to check out (default `video-pipeline`) |
 | `--expose-dashboard` | publish the dashboard on all interfaces (put HTTPS in front and set `DASHBOARD_SECURE_COOKIE=true`) |
 | `--no-swap` | don't add a swap file on low-memory machines |
+| `--with-claude` | also install Claude Code, Bun and tmux for the sudo user (see below) |
+
+## Claude Code on the server (`--with-claude`)
+
+Lets Claude work on this server remotely: read logs, fix code, rebuild.
+
+```bash
+sudo bash install-ubuntu.sh --with-claude            # new install
+sudo bash install-ubuntu.sh --update --with-claude   # add to an existing one
+```
+
+Run it with `sudo` from a normal user (not root): Claude Code goes into that
+user's `~/.local/bin`, Bun into `~/.bun` (typechecks), and `bun install` fills
+`node_modules` in the app folder. The user is already in the `docker` group.
+
+Size the server for it: **4 GB RAM** (Claude Code plus typechecks and image
+builds next to the running stack), 2 vCPU if you can, 30 GB disk.
+
+First use:
+
+```bash
+ssh you@SERVER_IP
+tmux new -A -s claude        # survives SSH drops; reattach with the same command
+cd /opt/affiliate-ai && claude
+```
+
+The first run asks you to log in with your Claude account. Then start Remote
+Control from inside the session to continue from the Claude app. Claude can
+read `.env` and restart containers on this machine, so keep its permission
+prompts on.
 
 ## Links, clicks and sales (no domain needed)
 
